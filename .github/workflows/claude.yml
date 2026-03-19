@@ -23,6 +23,7 @@ jobs:
   claude-issue:
     name: Propose implementation
     runs-on: ubuntu-latest
+    continue-on-error: true
     if: >
       github.event_name == 'issues' &&
       (github.event.action == 'opened' || github.event.action == 'labeled') &&
@@ -61,6 +62,7 @@ jobs:
   claude-issue-comment:
     name: Update PR from issue comment
     runs-on: ubuntu-latest
+    continue-on-error: true
     if: >
       github.event_name == 'issue_comment' &&
       github.event.action == 'created' &&
@@ -100,6 +102,7 @@ jobs:
   claude-pr-review:
     name: Review pull request
     runs-on: ubuntu-latest
+    continue-on-error: true
     if: >
       github.event_name == 'pull_request' &&
       (github.event.action == 'opened' || github.event.action == 'synchronize') &&
@@ -140,6 +143,7 @@ jobs:
   claude-pr-comment:
     name: Address PR comment
     runs-on: ubuntu-latest
+    continue-on-error: true
     if: >
       (github.event_name == 'issue_comment' &&
        github.event.action == 'created' &&
