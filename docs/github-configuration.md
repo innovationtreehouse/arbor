@@ -18,6 +18,7 @@ The `claude.yml` workflow automates issue implementation and PR review using Cla
 | Variable | Default | Description |
 |---|---|---|
 | `AGENT_NAME` | `Squirrel` | The Slack bot's display name. Injected into every Claude prompt so that any user-facing strings or system prompt text Claude writes uses the correct name |
+| `BOT_ACTOR` | _(empty)_ | GitHub login of the account associated with `AGENT_TOKEN`. When set, comments from this account are treated as bot comments and ignored to prevent reply loops. Set this to the username of your dedicated machine user |
 
 To set a value: **Settings → Secrets and variables → Actions → Variables → New repository variable**.
 

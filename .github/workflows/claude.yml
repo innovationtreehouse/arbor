@@ -15,6 +15,7 @@ on:
 # Falls back to "Squirrel" if the variable is not configured.
 env:
   AGENT_NAME: ${{ vars.AGENT_NAME || 'Squirrel' }}
+  BOT_ACTOR:  ${{ vars.BOT_ACTOR }}
 
 jobs:
   # ---------------------------------------------------------------------------
