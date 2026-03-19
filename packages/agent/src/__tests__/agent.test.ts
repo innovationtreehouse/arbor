@@ -68,7 +68,7 @@ describe("runAgent", () => {
     delete process.env.MODEL;
   });
 
-  it("falls back to claude-opus-4-6 when MODEL is not set", async () => {
+  it("falls back to claude-sonnet-4-6 when MODEL is not set", async () => {
     delete process.env.MODEL;
     vi.mocked(query).mockReturnValue(
       (async function* () {
@@ -79,7 +79,7 @@ describe("runAgent", () => {
     await runAgent("prompt", "system");
 
     const callArgs = vi.mocked(query).mock.calls[0][0];
-    expect(callArgs.options?.model).toBe("claude-opus-4-6");
+    expect(callArgs.options?.model).toBe("claude-sonnet-4-6");
   });
 
   it("includes gdrive, github, and urlFetcher MCP servers", async () => {
@@ -97,5 +97,35 @@ describe("runAgent", () => {
     expect(mcpServers).toHaveProperty("gdrive");
     expect(mcpServers).toHaveProperty("github");
     expect(mcpServers).toHaveProperty("urlFetcher");
+  });
+
+  it("passes model argument to query, taking priority over MODEL env var", async () => {
+    process.env.MODEL = "claude-opus-4-6";
+    vi.mocked(query).mockReturnValue(
+      (async function* () {
+        yield { result: "ok" };
+      })()
+    );
+
+    await runAgent("prompt", "system", "claude-haiku-4-5-20251001");
+
+    const callArgs = vi.mocked(query).mock.calls[0][0];
+    expect(callArgs.options?.model).toBe("claude-haiku-4-5-20251001");
+    delete process.env.MODEL;
+  });
+
+  it("passes DATABASE_URL to urlFetcher MCP env", async () => {
+    process.env.DATABASE_URL = "postgres://localhost/test";
+    vi.mocked(query).mockReturnValue(
+      (async function* () {
+        yield { result: "ok" };
+      })()
+    );
+
+    await runAgent("prompt", "system");
+
+    const { mcpServers } = vi.mocked(query).mock.calls[0][0].options ?? {};
+    expect((mcpServers as any)?.urlFetcher?.env?.DATABASE_URL).toBe("postgres://localhost/test");
+    expect((mcpServers as any)?.urlFetcher?.env).not.toHaveProperty("DYNAMODB_TABLE");
   });
 });

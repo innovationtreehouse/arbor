@@ -21,3 +21,10 @@ export interface UrlStore {
   /** Returns the total count of entries (for enforcing MAX_URL_COUNT). */
   count(): Promise<number>;
 }
+
+export interface ConfigStore {
+  /** Returns the value for a key, or undefined if not set. */
+  get(key: string): Promise<string | undefined>;
+  /** Sets a key to the given value (upsert). */
+  set(key: string, value: string): Promise<void>;
+}

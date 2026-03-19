@@ -1,3 +1,4 @@
-export type { UrlEntry, NewUrlEntry, UrlStore } from "./store.js";
+export type { UrlEntry, NewUrlEntry, UrlStore, ConfigStore } from "./store.js";
 export { PostgresUrlStore } from "./postgres-store.js";
-export { urlConfig } from "./schema.js";
+export { PostgresConfigStore } from "./config-store.js";
+export { urlConfig, agentConfig } from "./schema.js";

@@ -5,12 +5,13 @@ import {
   ListTasksCommand,
   RunTaskCommand,
 } from "@aws-sdk/client-ecs";
-import { PostgresUrlStore, type UrlStore } from "@arbor/db";
+import { PostgresUrlStore, PostgresConfigStore, type UrlStore, type ConfigStore } from "@arbor/db";
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
 
 const sqsClient = new SQSClient({});
 const ecsClient = new ECSClient({});
 const store: UrlStore = new PostgresUrlStore(process.env.DATABASE_URL!);
+const configStore: ConfigStore = new PostgresConfigStore(process.env.DATABASE_URL!);
 const AGENT_NAME = process.env.AGENT_NAME ?? "Squirrel";
 
 // ---------------------------------------------------------------------------
@@ -166,6 +167,8 @@ async function handleCommand(rawBody: string) {
       return handleRemove(args);
     case "test":
       return handleTest(args);
+    case "model":
+      return handleModel(args);
     default:
       return ephemeral(
         `*${AGENT_NAME} Admin Commands:*\n` +
@@ -173,6 +176,7 @@ async function handleCommand(rawBody: string) {
           "• `/squirrel-admin add <url> <description>` — add a URL to the allowlist\n" +
           "• `/squirrel-admin remove <url>` — remove a URL\n" +
           "• `/squirrel-admin test <url>` — preview URL content\n" +
+          "• `/squirrel-admin model [<model-id>]` — show or set the active Claude model\n" +
           "• `/squirrel-admin help` — show this message"
       );
   }
@@ -260,6 +264,18 @@ async function handleTest(args: string[]) {
     const msg = err instanceof Error ? err.message : String(err);
     return ephemeral(`❌ Fetch failed: ${msg}`);
   }
+}
+
+async function handleModel(args: string[]) {
+  if (args.length === 0) {
+    const current = await configStore.get("model");
+    const display = current ?? `claude-sonnet-4-6 (default)`;
+    return ephemeral(`*Active model:* \`${display}\``);
+  }
+
+  const model = args[0];
+  await configStore.set("model", model);
+  return ephemeral(`✅ Model set to \`${model}\`. Takes effect on the next message.`);
 }
 
 function ephemeral(text: string) {

@@ -3,7 +3,8 @@ import {
   ReceiveMessageCommand,
   DeleteMessageCommand,
 } from "@aws-sdk/client-sqs";
-import { fetchThreadHistory, postMessage } from "./slack.js";
+import { PostgresConfigStore } from "@arbor/db";
+import { fetchThreadHistory, postMessage, postEphemeral } from "./slack.js";
 import { runAgent } from "./agent.js";
 import { buildPrompt, buildSystemPrompt } from "./prompt.js";
 
@@ -16,15 +17,18 @@ interface SlackEvent {
 }
 
 const sqsClient = new SQSClient({ region: process.env.AWS_REGION });
+const configStore = new PostgresConfigStore(process.env.DATABASE_URL!);
 const IDLE_TIMEOUT_MS =
   parseInt(process.env.IDLE_TIMEOUT ?? "15", 10) * 60 * 1000;
 const SQS_WAIT_SECONDS = 20;
 
 export async function processEvent(event: SlackEvent): Promise<void> {
+  await postEphemeral(event.channel, event.user, "_Searching…_");
+  const model = await configStore.get("model");
   const history = await fetchThreadHistory(event.channel, event.thread_ts);
   const prompt = buildPrompt(history, event.text);
   const systemPrompt = buildSystemPrompt();
-  const response = await runAgent(prompt, systemPrompt);
+  const response = await runAgent(prompt, systemPrompt, model);
   await postMessage(event.channel, event.thread_ts, response);
 }
 

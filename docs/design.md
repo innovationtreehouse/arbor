@@ -56,12 +56,12 @@ Squirrel is the default name of the AI agent that operates as a named member of 
                               │ 1. Verify signature  │
                               │ 2. Check admin auth  │
                               │ 3. Read/write        │
-                              │    DynamoDB          │
+                              │    PostgreSQL        │
                               │ 4. Return ephemeral  │
                               └──────┬──────┬────────┘
                                      │      │
-                                  SQS│      │DynamoDB
-                                     │      │(url-config)
+                                  SQS│      │PostgreSQL
+                                     │      │(url_config)
                                      ▼      ▼
                                         │  ECS RunTask or
                                         │  SQS → container
@@ -103,7 +103,7 @@ Squirrel is the default name of the AI agent that operates as a named member of 
 |---|---|
 | **Slack Layer** | Message delivery, Squirrel identity rendering, slash command routing |
 | **Lambda Layer** | Webhook receipt, signature verification, Slack ACK, container orchestration, admin command handling |
-| **DynamoDB** | Persistent URL allowlist config; written by Lambda admin handler, read by `url-fetcher` MCP |
+| **PostgreSQL** | Persistent URL allowlist (`url_config`) and agent config (`agent_config`); written by Lambda admin handler, read by `url-fetcher` MCP |
 | **Agent Container** | Event handling, thread context assembly, agent reasoning, response posting |
 | **MCP Layer** | Independent child processes per integration, each holding its own credentials |
 
@@ -137,22 +137,31 @@ The Lambda function is the only always-on compute. It handles two routes:
 1. Verify `X-Slack-Signature`
 2. Check `user_id` against `ADMIN_USER_IDS` env var — return ephemeral error if unauthorized
 3. Parse subcommand and args
-4. Read/write DynamoDB `arbor-url-config` table
+4. Read/write PostgreSQL (`url_config` or `agent_config` tables)
 5. Return ephemeral JSON response inline (slash commands support synchronous response)
 
 The Lambda holds no AI logic and no agent state.
 
-### 3.2a DynamoDB (`arbor-url-config`)
+### 3.2a PostgreSQL (`url_config`, `agent_config`)
 
-Stores the URL allowlist managed via `/squirrel-admin`. Written by the Lambda admin handler; read by the `url-fetcher` MCP server on a 60-second poll interval.
+Stores the URL allowlist and agent configuration managed via `/squirrel-admin`. Written by the Lambda admin handler; `url_config` is read by the `url-fetcher` MCP server on a 60-second poll interval, and `agent_config` is read by the agent on every message.
 
-| Attribute | Type | Description |
+**`url_config`** — URL allowlist:
+
+| Column | Type | Description |
 |---|---|---|
-| `url` (PK) | String | The URL |
-| `description` | String | Human-readable label shown to the model |
-| `added_by` | String | Slack user ID of the admin who added it |
-| `added_at` | String | ISO timestamp |
-| `enabled` | Boolean | Whether the URL is active |
+| `url` (PK) | text | The URL |
+| `description` | text | Human-readable label shown to the model |
+| `added_by` | text | Slack user ID of the admin who added it |
+| `added_at` | timestamptz | When the entry was created |
+| `enabled` | boolean | Whether the URL is active |
+
+**`agent_config`** — Key-value agent settings (e.g. `model`):
+
+| Column | Type | Description |
+|---|---|---|
+| `key` (PK) | text | Setting name (e.g. `model`) |
+| `value` | text | Setting value |
 
 ### 3.3 ECS Fargate Container (`arbor-agent`)
 
@@ -291,13 +300,13 @@ async function buildPrompt(channel: string, threadTs: string, newText: string): 
 | Environment Variable | Used By | Purpose |
 |---|---|---|
 | `SLACK_SIGNING_SECRET` | Lambda | Verify inbound webhook signatures |
-| `SLACK_BOT_TOKEN` | Agent container, `server-slack` | Post messages, fetch thread history |
+| `SLACK_BOT_TOKEN` | Agent container | Post messages, fetch thread history |
 | `ADMIN_USER_IDS` | Lambda | Comma-separated Slack user IDs authorized for `/squirrel-admin` |
 | `ANTHROPIC_API_KEY` | Claude Agent SDK | Anthropic API |
 | `GOOGLE_CREDENTIALS` | `server-gdrive` | Google service account key (JSON) |
 | `GITHUB_TOKEN` | `server-github` | GitHub fine-grained PAT |
-| `DYNAMODB_TABLE` | Lambda (admin handler), `url-fetcher` MCP | DynamoDB table name for URL allowlist |
-| `URL_POLL_INTERVAL_S` | `url-fetcher` MCP | Seconds between DynamoDB reloads (default: 60) |
+| `DATABASE_URL` | Lambda, Agent, `url-fetcher` MCP | PostgreSQL connection string |
+| `URL_POLL_INTERVAL_S` | `url-fetcher` MCP | Seconds between PostgreSQL reloads (default: 60) |
 
 All secrets are stored in AWS Secrets Manager or SSM Parameter Store and injected into the Lambda and ECS task definitions at deploy time. No secrets are stored in environment files or Docker images.
 
@@ -407,6 +416,7 @@ All commands are invoked as `/squirrel-admin <subcommand> [args]`. Responses are
 | `add` | `/squirrel-admin add <url> <description>` | Add a URL to the allowlist with a human-readable label |
 | `remove` | `/squirrel-admin remove <url>` | Remove a URL from the allowlist |
 | `test` | `/squirrel-admin test <url>` | Fetch the URL and return a preview of the content Squirrel would receive (first 500 chars) |
+| `model` | `/squirrel-admin model [<model-id>]` | Show the active Claude model, or set it to a new one |
 | `help` | `/squirrel-admin help` | Show available commands |
 
 **Examples:**
@@ -418,19 +428,11 @@ All commands are invoked as `/squirrel-admin <subcommand> [args]`. Responses are
 /squirrel-admin remove https://notion.so/abc123
 ```
 
-### 9.3 Config Storage (DynamoDB)
+### 9.3 Config Storage (PostgreSQL)
 
-URL configurations are stored in a DynamoDB table (`arbor-url-config`):
+URL configurations are stored in the `url_config` PostgreSQL table. Agent settings (such as the active model) are stored in the `agent_config` table. Both are managed via Drizzle ORM in the `@arbor/db` package. See §3.2a for the full schema.
 
-| Attribute | Type | Description |
-|---|---|---|
-| `url` (PK) | String | The URL (primary key) |
-| `description` | String | Human-readable label shown to the model |
-| `added_by` | String | Slack user ID of the admin who added it |
-| `added_at` | String | ISO timestamp |
-| `enabled` | Boolean | Whether the URL is active |
-
-The Lambda handler reads/writes this table for all admin commands. The `url-fetcher` MCP server reads from the same table on a 60-second poll interval.
+The Lambda handler reads/writes both tables for admin commands. The `url-fetcher` MCP server reads `url_config` on a 60-second poll interval. The agent reads `agent_config` on every message.
 
 ### 9.4 Config Propagation
 
@@ -441,14 +443,25 @@ Admin: /squirrel-admin add <url> <desc>
        Lambda handler
        - Verifies admin authorization
        - Validates URL format
-       - Writes to DynamoDB
+       - Writes to PostgreSQL (url_config)
        - Returns ephemeral confirmation
            │
            ▼ (within ~60s)
        url-fetcher MCP server
-       - Polls DynamoDB on interval
+       - Polls PostgreSQL on interval
        - Refreshes in-memory allowlist
        - New URL available to agent
+
+Admin: /squirrel-admin model <model-id>
+           │
+           ▼
+       Lambda handler
+       - Writes to PostgreSQL (agent_config key=model)
+           │
+           ▼ (next Slack message)
+       Agent container
+       - Reads model from agent_config on each event
+       - Passes model to runAgent()
 ```
 
 No container restart is required. Changes propagate on the next poll cycle (≤60 seconds).

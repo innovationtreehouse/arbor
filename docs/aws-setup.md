@@ -37,6 +37,15 @@ GOOGLE_CREDENTIALS_FILE="/path/to/service-account.json"
 GITHUB_TOKEN="ghp_your-token"
 ADMIN_USER_IDS="U12345678"   # comma-separated Slack user IDs for /squirrel-admin
 
+# Set USE_EXISTING_DB=true to skip RDS creation and use an existing PostgreSQL instance.
+# If true, you must also set EXISTING_DB_HOST, EXISTING_DB_NAME, EXISTING_DB_USER,
+# EXISTING_DB_PASSWORD.
+USE_EXISTING_DB="false"
+EXISTING_DB_HOST=""
+EXISTING_DB_NAME="arbor"
+EXISTING_DB_USER="arbor"
+EXISTING_DB_PASSWORD=""
+
 # =============================================================================
 # Derived — do not edit
 # =============================================================================
@@ -184,46 +193,58 @@ echo "Networking done. VPC=$VPC_ID"
 
 
 # =============================================================================
-# 2. Database (RDS PostgreSQL)
+# 2. Database (RDS PostgreSQL or existing)
 # =============================================================================
 
 echo "--- 2. Database ---"
 
-aws rds create-db-subnet-group \
-  --db-subnet-group-name arbor-db-subnets \
-  --db-subnet-group-description "Arbor DB subnets" \
-  --subnet-ids "$PRIVATE_SUBNET_A" "$PRIVATE_SUBNET_B"
+if [ "$USE_EXISTING_DB" = "true" ]; then
+  DATABASE_URL="postgres://${EXISTING_DB_USER}:${EXISTING_DB_PASSWORD}@${EXISTING_DB_HOST}/${EXISTING_DB_NAME}"
+  echo "Using existing database. Host=${EXISTING_DB_HOST}"
+else
+  aws rds create-db-subnet-group \
+    --db-subnet-group-name arbor-db-subnets \
+    --db-subnet-group-description "Arbor DB subnets" \
+    --subnet-ids "$PRIVATE_SUBNET_A" "$PRIVATE_SUBNET_B"
 
-aws rds create-db-instance \
-  --db-instance-identifier arbor-db \
-  --db-instance-class db.t4g.micro \
-  --engine postgres \
-  --engine-version 16 \
-  --master-username arbor \
-  --master-user-password "$DB_PASSWORD" \
-  --db-name arbor \
-  --allocated-storage 20 \
-  --storage-type gp3 \
-  --no-publicly-accessible \
-  --vpc-security-group-ids "$RDS_SG" \
-  --db-subnet-group-name arbor-db-subnets \
-  --backup-retention-period 7 \
-  --no-multi-az
+  aws rds create-db-instance \
+    --db-instance-identifier arbor-db \
+    --db-instance-class db.t4g.micro \
+    --engine postgres \
+    --engine-version 16 \
+    --master-username arbor \
+    --master-user-password "$DB_PASSWORD" \
+    --db-name arbor \
+    --allocated-storage 20 \
+    --storage-type gp3 \
+    --no-publicly-accessible \
+    --vpc-security-group-ids "$RDS_SG" \
+    --db-subnet-group-name arbor-db-subnets \
+    --backup-retention-period 7 \
+    --no-multi-az
 
-echo "Waiting for RDS instance (5-10 min)..."
-aws rds wait db-instance-available --db-instance-identifier arbor-db
+  echo "Waiting for RDS instance (5-10 min)..."
+  aws rds wait db-instance-available --db-instance-identifier arbor-db
 
-DB_HOST=$(aws rds describe-db-instances \
-  --db-instance-identifier arbor-db \
-  --query 'DBInstances[0].Endpoint.Address' --output text)
+  DB_HOST=$(aws rds describe-db-instances \
+    --db-instance-identifier arbor-db \
+    --query 'DBInstances[0].Endpoint.Address' --output text)
 
-DATABASE_URL="postgres://arbor:${DB_PASSWORD}@${DB_HOST}/arbor"
-echo "Database ready. Host=$DB_HOST"
+  DATABASE_URL="postgres://arbor:${DB_PASSWORD}@${DB_HOST}/arbor"
+  echo "Database ready. Host=$DB_HOST"
+fi
 
-# Create the schema via psql from within the VPC.
-# If you have a bastion or SSM session, run this SQL manually:
+# Run Drizzle migrations to create all tables (url_config, agent_config).
+# This requires DATABASE_URL to be reachable from this machine.
+# If the database is only accessible from within the VPC, run this from a
+# bastion host or via an SSM port-forwarding session:
 #
-#   CREATE TABLE url_config (
+#   export DATABASE_URL="..."
+#   (cd packages/db && npm run db:migrate)
+#
+# Or apply the SQL manually:
+#
+#   CREATE TABLE IF NOT EXISTS url_config (
 #     url         TEXT PRIMARY KEY,
 #     description TEXT        NOT NULL,
 #     enabled     BOOLEAN     NOT NULL DEFAULT true,
@@ -231,11 +252,13 @@ echo "Database ready. Host=$DB_HOST"
 #     added_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 #   );
 #
-# Or if psql is available and reachable from this machine:
-# psql "$DATABASE_URL" -c "CREATE TABLE IF NOT EXISTS url_config (
-#   url TEXT PRIMARY KEY, description TEXT NOT NULL,
-#   enabled BOOLEAN NOT NULL DEFAULT true,
-#   added_by TEXT NOT NULL, added_at TIMESTAMPTZ NOT NULL DEFAULT NOW());"
+#   CREATE TABLE IF NOT EXISTS agent_config (
+#     key   TEXT PRIMARY KEY,
+#     value TEXT NOT NULL
+#   );
+#
+# If the database is reachable from this machine, uncomment the next line:
+# (cd packages/db && DATABASE_URL="$DATABASE_URL" npm run db:migrate)
 
 
 # =============================================================================
@@ -497,7 +520,7 @@ echo "Setup complete."
 echo "API Gateway URL: $API_URL"
 echo ""
 echo "Next steps:"
-echo "  1. Create the url_config table in your database (see §2.3 above)"
+echo "  1. Run database migrations (see §2 above) if not already done"
 echo "  2. Configure your Slack app — use the URL above:"
 echo "       Events:   ${API_URL}/slack/events"
 echo "       Commands: ${API_URL}/slack/commands"
