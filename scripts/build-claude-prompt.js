@@ -260,18 +260,18 @@ async function main() {
       }
     }
 
-  } else if (
-    EVENT_NAME === 'pull_request' &&
-    (event.action === 'opened' || event.action === 'synchronize')
-  ) {
-    // PR review — skip PRs that Claude opened
-    const pr = event.pull_request;
-    if (!pr.head.ref.startsWith('claude/')) {
-      const diff = await ghGet(`/pulls/${pr.number}`, {
-        accept: 'application/vnd.github.diff',
-        raw:    true,
-      });
-      prompt = prReviewPrompt(pr, diff);
+  } else if (EVENT_NAME === 'workflow_run') {
+    // PR review — triggered after CI completes on a pull_request event
+    const prNumber = event.workflow_run.pull_requests?.[0]?.number;
+    if (prNumber) {
+      const pr = await ghGet(`/pulls/${prNumber}`);
+      if (!pr.head.ref.startsWith('claude/')) {
+        const diff = await ghGet(`/pulls/${prNumber}`, {
+          accept: 'application/vnd.github.diff',
+          raw:    true,
+        });
+        prompt = prReviewPrompt(pr, diff);
+      }
     }
 
   } else if (EVENT_NAME === 'pull_request_review_comment' && event.action === 'created') {
