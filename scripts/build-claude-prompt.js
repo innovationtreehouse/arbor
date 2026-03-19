@@ -245,7 +245,10 @@ async function main() {
     prompt = issuePrompt(event.issue);
 
   } else if (EVENT_NAME === 'issue_comment' && event.action === 'created') {
-    if (!event.issue.pull_request) {
+    // Ignore bot comments to prevent loops
+    if (event.comment.user.type === 'Bot') {
+      // skip
+    } else if (!event.issue.pull_request) {
       // Comment on a plain issue — find the related PR and update it
       const [comments, existingPR] = await Promise.all([
         ghGet(`/issues/${event.issue.number}/comments`),
@@ -275,10 +278,12 @@ async function main() {
     }
 
   } else if (EVENT_NAME === 'pull_request_review_comment' && event.action === 'created') {
-    // Inline review comment — only handle Claude's own PRs
-    const pr = event.pull_request;
-    if (pr.head.ref.startsWith('claude/')) {
-      prompt = prCommentPrompt(pr, event.comment, event.comment.path);
+    // Inline review comment — only handle Claude's own PRs; ignore bot comments
+    if (event.comment.user.type !== 'Bot') {
+      const pr = event.pull_request;
+      if (pr.head.ref.startsWith('claude/')) {
+        prompt = prCommentPrompt(pr, event.comment, event.comment.path);
+      }
     }
   }
 
