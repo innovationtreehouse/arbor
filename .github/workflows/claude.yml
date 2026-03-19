@@ -2,7 +2,7 @@ name: Claude
 
 on:
   issues:
-    types: [opened]
+    types: [opened, labeled]
   issue_comment:
     types: [created]
   pull_request:
@@ -23,7 +23,10 @@ jobs:
   claude-issue:
     name: Propose implementation
     runs-on: ubuntu-latest
-    if: github.event_name == 'issues' && github.event.action == 'opened'
+    if: >
+      github.event_name == 'issues' &&
+      (github.event.action == 'opened' || github.event.action == 'labeled') &&
+      contains(github.event.issue.labels.*.name, 'claude')
     permissions:
       contents: write
       issues: write
@@ -61,7 +64,8 @@ jobs:
     if: >
       github.event_name == 'issue_comment' &&
       github.event.action == 'created' &&
-      !github.event.issue.pull_request
+      !github.event.issue.pull_request &&
+      contains(github.event.issue.labels.*.name, 'claude')
     permissions:
       contents: write
       issues: write
