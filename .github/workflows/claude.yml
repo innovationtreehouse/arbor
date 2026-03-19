@@ -140,6 +140,10 @@ jobs:
           prompt:            ${{ steps.prompt.outputs.prompt }}
           show_full_output:  true
 
+      - name: Dump execution output
+        if: always()
+        run: cat /home/runner/work/_temp/claude-execution-output.json || echo "File not found"
+
   # ---------------------------------------------------------------------------
   # Comment on Claude's own PR → address the feedback
   # Handles both timeline comments (issue_comment) and inline diff comments
