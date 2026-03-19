@@ -52,7 +52,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
-          direct_prompt:     ${{ steps.prompt.outputs.prompt }}
+          prompt:     ${{ steps.prompt.outputs.prompt }}
 
   # ---------------------------------------------------------------------------
   # Comment on a plain issue → update the related PR
@@ -91,7 +91,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
-          direct_prompt:     ${{ steps.prompt.outputs.prompt }}
+          prompt:     ${{ steps.prompt.outputs.prompt }}
 
   # ---------------------------------------------------------------------------
   # PR opened/updated (not Claude's) → post a review
@@ -128,7 +128,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
-          direct_prompt:     ${{ steps.prompt.outputs.prompt }}
+          prompt:     ${{ steps.prompt.outputs.prompt }}
 
   # ---------------------------------------------------------------------------
   # Comment on Claude's own PR → address the feedback
@@ -174,4 +174,4 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
-          direct_prompt:     ${{ steps.prompt.outputs.prompt }}
+          prompt:     ${{ steps.prompt.outputs.prompt }}
