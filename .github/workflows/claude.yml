@@ -158,17 +158,12 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
           prompt:            ${{ steps.prompt.outputs.prompt }}
-          show_full_output:  true
           settings: |
             {
               "permissions": {
                 "allow": ["Bash(gh pr review *)", "Bash(gh pr comment *)"]
               }
             }
-
-      - name: Dump execution output
-        if: always()
-        run: cat /home/runner/work/_temp/claude-execution-output.json || echo "File not found"
 
   # ---------------------------------------------------------------------------
   # Comment on Claude's own PR → address the feedback
