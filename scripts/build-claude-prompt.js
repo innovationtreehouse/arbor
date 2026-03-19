@@ -11,6 +11,7 @@ const EVENT_PATH = process.env.GITHUB_EVENT_PATH;
 const GH_OUTPUT  = process.env.GITHUB_OUTPUT;
 const TOKEN      = process.env.GITHUB_TOKEN;
 const AGENT_NAME = process.env.AGENT_NAME || 'Squirrel';
+const BOT_ACTOR  = process.env.BOT_ACTOR  || '';
 
 if (!REPO || !EVENT_NAME || !EVENT_PATH || !GH_OUTPUT || !TOKEN) {
   console.error('Missing required environment variables');
@@ -246,7 +247,9 @@ async function main() {
 
   } else if (EVENT_NAME === 'issue_comment' && event.action === 'created') {
     // Ignore bot comments to prevent loops
-    if (event.comment.user.type === 'Bot') {
+    const isBot = event.comment.user.type === 'Bot' ||
+      (BOT_ACTOR && event.comment.user.login === BOT_ACTOR);
+    if (isBot) {
       // skip
     } else if (!event.issue.pull_request) {
       // Comment on a plain issue — find the related PR and update it
@@ -279,7 +282,9 @@ async function main() {
 
   } else if (EVENT_NAME === 'pull_request_review_comment' && event.action === 'created') {
     // Inline review comment — only handle Claude's own PRs; ignore bot comments
-    if (event.comment.user.type !== 'Bot') {
+    const isBot = event.comment.user.type === 'Bot' ||
+      (BOT_ACTOR && event.comment.user.login === BOT_ACTOR);
+    if (!isBot) {
       const pr = event.pull_request;
       if (pr.head.ref.startsWith('claude/')) {
         prompt = prCommentPrompt(pr, event.comment, event.comment.path);
