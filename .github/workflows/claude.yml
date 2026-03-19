@@ -56,6 +56,16 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
           prompt:     ${{ steps.prompt.outputs.prompt }}
+          settings: |
+            {
+              "permissions": {
+                "allow": [
+                  "Bash(git fetch *)", "Bash(git checkout *)",
+                  "Bash(git add *)", "Bash(git commit *)", "Bash(git push *)",
+                  "Bash(gh pr create *)", "Bash(gh issue comment *)"
+                ]
+              }
+            }
 
   # ---------------------------------------------------------------------------
   # Comment on a plain issue → update the related PR
@@ -96,6 +106,16 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
           prompt:     ${{ steps.prompt.outputs.prompt }}
+          settings: |
+            {
+              "permissions": {
+                "allow": [
+                  "Bash(git fetch *)", "Bash(git checkout *)",
+                  "Bash(git add *)", "Bash(git commit *)", "Bash(git push *)",
+                  "Bash(gh issue comment *)"
+                ]
+              }
+            }
 
   # ---------------------------------------------------------------------------
   # PR opened/updated (not Claude's) → post a review
@@ -196,3 +216,13 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
           prompt:     ${{ steps.prompt.outputs.prompt }}
+          settings: |
+            {
+              "permissions": {
+                "allow": [
+                  "Bash(git fetch *)", "Bash(git checkout *)",
+                  "Bash(git add *)", "Bash(git commit *)", "Bash(git push *)",
+                  "Bash(gh pr review *)", "Bash(gh pr comment *)"
+                ]
+              }
+            }
