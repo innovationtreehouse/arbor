@@ -1,0 +1,173 @@
+name: Claude
+
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [opened, synchronize]
+  pull_request_review_comment:
+    types: [created]
+
+# Set AGENT_NAME from a repository variable (Settings → Variables).
+# Falls back to "Squirrel" if the variable is not configured.
+env:
+  AGENT_NAME: ${{ vars.AGENT_NAME || 'Squirrel' }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # New issue → propose implementation in a PR
+  # ---------------------------------------------------------------------------
+
+  claude-issue:
+    name: Propose implementation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && github.event.action == 'opened'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    concurrency:
+      group: claude-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build prompt
+        id: prompt
+        run: node scripts/build-claude-prompt.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
+
+      - name: Run Claude
+        if: steps.prompt.outputs.skip != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
+          github_token:      ${{ secrets.AGENT_TOKEN }}
+          direct_prompt:     ${{ steps.prompt.outputs.prompt }}
+
+  # ---------------------------------------------------------------------------
+  # Comment on a plain issue → update the related PR
+  # ---------------------------------------------------------------------------
+
+  claude-issue-comment:
+    name: Update PR from issue comment
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'issue_comment' &&
+      github.event.action == 'created' &&
+      !github.event.issue.pull_request
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    concurrency:
+      group: claude-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build prompt
+        id: prompt
+        run: node scripts/build-claude-prompt.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
+
+      - name: Run Claude
+        if: steps.prompt.outputs.skip != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
+          github_token:      ${{ secrets.AGENT_TOKEN }}
+          direct_prompt:     ${{ steps.prompt.outputs.prompt }}
+
+  # ---------------------------------------------------------------------------
+  # PR opened/updated (not Claude's) → post a review
+  # ---------------------------------------------------------------------------
+
+  claude-pr-review:
+    name: Review pull request
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'pull_request' &&
+      (github.event.action == 'opened' || github.event.action == 'synchronize') &&
+      !startsWith(github.head_ref, 'claude/')
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: claude-pr-review-${{ github.event.pull_request.number }}-${{ github.sha }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build prompt
+        id: prompt
+        run: node scripts/build-claude-prompt.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
+
+      - name: Run Claude
+        if: steps.prompt.outputs.skip != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
+          github_token:      ${{ secrets.AGENT_TOKEN }}
+          direct_prompt:     ${{ steps.prompt.outputs.prompt }}
+
+  # ---------------------------------------------------------------------------
+  # Comment on Claude's own PR → address the feedback
+  # Handles both timeline comments (issue_comment) and inline diff comments
+  # (pull_request_review_comment).  The build-claude-prompt script outputs
+  # skip=true if the PR head branch does not start with "claude/".
+  # ---------------------------------------------------------------------------
+
+  claude-pr-comment:
+    name: Address PR comment
+    runs-on: ubuntu-latest
+    if: >
+      (github.event_name == 'issue_comment' &&
+       github.event.action == 'created' &&
+       github.event.issue.pull_request) ||
+      (github.event_name == 'pull_request_review_comment' &&
+       github.event.action == 'created')
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: >-
+        claude-pr-comment-${{
+          github.event.issue.number ||
+          github.event.pull_request.number
+        }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build prompt
+        id: prompt
+        run: node scripts/build-claude-prompt.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
+
+      - name: Run Claude
+        if: steps.prompt.outputs.skip != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
+          github_token:      ${{ secrets.AGENT_TOKEN }}
+          direct_prompt:     ${{ steps.prompt.outputs.prompt }}

@@ -1,0 +1,23 @@
+export interface UrlEntry {
+  url: string;
+  description: string;
+  enabled: boolean;
+  added_by: string;
+  added_at: string; // ISO 8601
+}
+
+/** Fields required when inserting; added_at is set by the database. */
+export type NewUrlEntry = Omit<UrlEntry, "added_at">;
+
+export interface UrlStore {
+  /** Returns only enabled entries — used by the URL Fetcher MCP server. */
+  listEnabled(): Promise<UrlEntry[]>;
+  /** Returns all entries regardless of enabled status — used by the admin command. */
+  listAll(): Promise<UrlEntry[]>;
+  /** Inserts or updates a URL entry. */
+  upsert(entry: NewUrlEntry): Promise<void>;
+  /** Removes a URL entry by primary key. */
+  delete(url: string): Promise<void>;
+  /** Returns the total count of entries (for enforcing MAX_URL_COUNT). */
+  count(): Promise<number>;
+}

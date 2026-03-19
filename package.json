@@ -1,0 +1,19 @@
+{
+  "name": "arbor",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -p packages/db && tsc --build packages/lambda packages/agent packages/mcp-url-fetcher",
+    "clean": "rm -rf packages/*/dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.0",
+    "aws-sdk-client-mock": "^4.1.0",
+    "vitest": "^4.1.0"
+  }
+}
