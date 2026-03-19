@@ -7,7 +7,7 @@ import {
   RunTaskCommand,
 } from "@aws-sdk/client-ecs";
 import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
-import type { UrlStore, UrlEntry } from "@arbor/db";
+import type { UrlStore, UrlEntry, ConfigStore } from "@arbor/db";
 
 // ---------------------------------------------------------------------------
 // Mock @arbor/db before importing the handler
@@ -21,9 +21,17 @@ const mockStore: UrlStore = {
   count: vi.fn().mockResolvedValue(0),
 };
 
+const mockConfigStore: ConfigStore = {
+  get: vi.fn().mockResolvedValue(undefined),
+  set: vi.fn().mockResolvedValue(undefined),
+};
+
 vi.mock("@arbor/db", () => ({
   PostgresUrlStore: vi.fn().mockImplementation(function () {
     return mockStore;
+  }),
+  PostgresConfigStore: vi.fn().mockImplementation(function () {
+    return mockConfigStore;
   }),
 }));
 
@@ -82,6 +90,8 @@ beforeEach(() => {
   vi.mocked(mockStore.upsert).mockResolvedValue(undefined);
   vi.mocked(mockStore.delete).mockResolvedValue(undefined);
   vi.mocked(mockStore.count).mockResolvedValue(0);
+  vi.mocked(mockConfigStore.get).mockResolvedValue(undefined);
+  vi.mocked(mockConfigStore.set).mockResolvedValue(undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -366,5 +376,36 @@ describe("/slack/commands", () => {
     const payload = JSON.parse(res?.body ?? "");
     expect(payload.text).toContain("ECONNREFUSED");
     vi.unstubAllGlobals();
+  });
+
+  it("model — shows current model when no argument given", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce("claude-opus-4-6");
+    const res = await handler(makeCommandEvent("U_ADMIN", "model"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("claude-opus-4-6");
+  });
+
+  it("model — shows default when no model is set", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce(undefined);
+    const res = await handler(makeCommandEvent("U_ADMIN", "model"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("default");
+  });
+
+  it("model — sets model when argument provided", async () => {
+    const res = await handler(
+      makeCommandEvent("U_ADMIN", "model claude-haiku-4-5-20251001"),
+      {} as any,
+      {} as any
+    );
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("claude-haiku-4-5-20251001");
+    expect(vi.mocked(mockConfigStore.set)).toHaveBeenCalledWith("model", "claude-haiku-4-5-20251001");
+  });
+
+  it("model — help text mentions model subcommand", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "help"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("model");
   });
 });

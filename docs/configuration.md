@@ -38,10 +38,27 @@ The agent container also runs the `mcp-url-fetcher` MCP server in-process, which
 | `SQS_QUEUE_URL` | No | — | Same SQS queue URL as Lambda |
 | `AWS_REGION` | No | — | AWS region (e.g. `us-east-1`) |
 | `AGENT_NAME` | No | `Squirrel` | Bot display name used in the system prompt and thread message labels |
-| `MODEL` | No | `claude-opus-4-6` | Claude model ID |
+| `MODEL` | No | `claude-sonnet-4-6` | Claude model ID used as fallback when no model is set in `agent_config` |
 | `IDLE_TIMEOUT` | No | `15` | Minutes of SQS inactivity before the container calls `process.exit(0)` |
 | `THREAD_HISTORY_LIMIT` | No | `50` | Maximum number of prior Slack messages to include as thread context |
 | `URL_POLL_INTERVAL_S` | No | `60` | How often the URL Fetcher MCP server refreshes the allowlist from the database, in seconds |
+
+---
+
+---
+
+## Runtime model override
+
+The active Claude model can be changed at runtime without redeploying, using the `/squirrel-admin model` slash command:
+
+```
+/squirrel-admin model                          # show current model
+/squirrel-admin model claude-opus-4-6          # switch to Opus
+/squirrel-admin model claude-sonnet-4-6        # switch to Sonnet (default)
+/squirrel-admin model claude-haiku-4-5-20251001  # switch to Haiku
+```
+
+The model is stored in the `agent_config` PostgreSQL table under the key `model`. It takes effect on the next message the agent processes — no container restart required. The `MODEL` environment variable serves as the fallback when no value is stored in the database.
 
 ---
 

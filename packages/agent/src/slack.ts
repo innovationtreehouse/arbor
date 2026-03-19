@@ -36,3 +36,15 @@ export async function postMessage(
     text: truncated,
   });
 }
+
+export async function postEphemeral(
+  channel: string,
+  userId: string,
+  text: string
+): Promise<void> {
+  await client.chat.postEphemeral({
+    channel,
+    user: userId,
+    text,
+  });
+}

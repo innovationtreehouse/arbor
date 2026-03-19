@@ -5,10 +5,27 @@ import {
   ReceiveMessageCommand,
   SQSClient,
 } from "@aws-sdk/client-sqs";
+import type { ConfigStore } from "@arbor/db";
+
+// ---------------------------------------------------------------------------
+// Mock @arbor/db before importing the module under test
+// ---------------------------------------------------------------------------
+
+const mockConfigStore: ConfigStore = {
+  get: vi.fn().mockResolvedValue(undefined),
+  set: vi.fn().mockResolvedValue(undefined),
+};
+
+vi.mock("@arbor/db", () => ({
+  PostgresConfigStore: vi.fn().mockImplementation(function () {
+    return mockConfigStore;
+  }),
+}));
 
 vi.mock("../slack.js", () => ({
   fetchThreadHistory: vi.fn().mockResolvedValue([]),
   postMessage: vi.fn().mockResolvedValue(undefined),
+  postEphemeral: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../agent.js", () => ({
@@ -22,7 +39,7 @@ vi.mock("../prompt.js", () => ({
 
 const sqsMock = mockClient(SQSClient);
 
-const { fetchThreadHistory, postMessage } = await import("../slack.js");
+const { fetchThreadHistory, postMessage, postEphemeral } = await import("../slack.js");
 const { runAgent } = await import("../agent.js");
 const { buildPrompt, buildSystemPrompt } = await import("../prompt.js");
 const { processEvent } = await import("../index.js");
@@ -39,16 +56,24 @@ beforeEach(() => {
   sqsMock.reset();
   vi.mocked(fetchThreadHistory).mockClear();
   vi.mocked(postMessage).mockClear();
+  vi.mocked(postEphemeral).mockClear();
   vi.mocked(runAgent).mockClear();
   vi.mocked(buildPrompt).mockClear();
   vi.mocked(buildSystemPrompt).mockClear();
+  vi.mocked(mockConfigStore.get).mockResolvedValue(undefined);
 
   process.env.SQS_QUEUE_URL = "https://sqs.test/queue";
   process.env.AWS_REGION = "us-east-1";
   process.env.SLACK_BOT_TOKEN = "xoxb-test";
+  process.env.DATABASE_URL = "postgres://localhost/test";
 });
 
 describe("processEvent", () => {
+  it("posts ephemeral searching message before running agent", async () => {
+    await processEvent(baseEvent);
+    expect(postEphemeral).toHaveBeenCalledWith("C_CHAN", "U1", "_Searching…_");
+  });
+
   it("fetches thread history, runs agent, and posts response", async () => {
     const history = [{ user: "U1", text: "earlier message" }];
     vi.mocked(fetchThreadHistory).mockResolvedValueOnce(history);
@@ -59,8 +84,17 @@ describe("processEvent", () => {
     expect(fetchThreadHistory).toHaveBeenCalledWith("C_CHAN", "1.0");
     expect(buildPrompt).toHaveBeenCalledWith(history, baseEvent.text);
     expect(buildSystemPrompt).toHaveBeenCalled();
-    expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt");
+    expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", undefined);
     expect(postMessage).toHaveBeenCalledWith("C_CHAN", "1.0", "Here is your answer.");
+  });
+
+  it("passes model from configStore to runAgent", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce("claude-opus-4-6");
+
+    await processEvent(baseEvent);
+
+    expect(mockConfigStore.get).toHaveBeenCalledWith("model");
+    expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", "claude-opus-4-6");
   });
 
   it("passes the agent response to postMessage", async () => {

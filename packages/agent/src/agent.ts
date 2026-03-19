@@ -3,7 +3,8 @@ import * as path from "path";
 
 export async function runAgent(
   prompt: string,
-  systemPrompt: string
+  systemPrompt: string,
+  model?: string
 ): Promise<string> {
   const urlFetcherPath = path.resolve(
     __dirname,
@@ -15,7 +16,7 @@ export async function runAgent(
   for await (const message of query({
     prompt,
     options: {
-      model: process.env.MODEL ?? "claude-opus-4-6",
+      model: model ?? process.env.MODEL ?? "claude-sonnet-4-6",
       systemPrompt,
       mcpServers: {
         gdrive: {
@@ -36,8 +37,7 @@ export async function runAgent(
           command: "node",
           args: [urlFetcherPath],
           env: {
-            DYNAMODB_TABLE: process.env.DYNAMODB_TABLE!,
-            AWS_REGION: process.env.AWS_REGION!,
+            DATABASE_URL: process.env.DATABASE_URL!,
             URL_POLL_INTERVAL_S: process.env.URL_POLL_INTERVAL_S ?? "60",
           },
         },
