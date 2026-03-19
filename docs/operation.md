@@ -1,6 +1,6 @@
-# How Squirrel Works
+# How It Works
 
-This document describes the end-to-end operation of Squirrel: what happens from the moment a user mentions it in Slack through to the reply appearing in the thread.
+This document describes the end-to-end operation of the Squirrel agent (display name configurable via `AGENT_NAME`, default `Squirrel`): what happens from the moment a user mentions it in Slack through to the reply appearing in the thread.
 
 ## System Components
 
@@ -141,8 +141,8 @@ and compares it to the `X-Slack-Signature` header using `crypto.timingSafeEqual`
 
 The agent prompt includes:
 
-1. **System prompt** — instructs Claude to act as Squirrel, describes available tools (Drive, GitHub, URL Fetcher), and sets a 3,900-character response length limit.
-2. **Thread history** — all previous messages in the thread, formatted as `{label}: {text}`. Bot messages are labeled "Squirrel"; human messages use the Slack user ID.
+1. **System prompt** — instructs Claude to act as the configured agent name (`AGENT_NAME`), describes available tools (Drive, GitHub, URL Fetcher), and sets a 3,900-character response length limit.
+2. **Thread history** — all previous messages in the thread, formatted as `{label}: {text}`. Bot messages are labeled with `AGENT_NAME`; human messages use the Slack user ID.
 3. **Current message** — the text of the `app_mention` event that triggered this run.
 
 Thread history older than the last message is included for context but the current message is not duplicated.

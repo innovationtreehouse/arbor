@@ -4,11 +4,11 @@
 
 ### Purpose
 
-Squirrel is an AI agent that operates as a named member of a Slack workspace. It accepts natural-language requests via Slack mentions, reasons over multiple external data sources (Google Drive, GitHub, curated web URLs), and returns synthesized responses within the Slack thread.
+Squirrel is the default name of the AI agent that operates as a named member of a Slack workspace. The display name is configurable via the `AGENT_NAME` environment variable (default: `Squirrel`). It accepts natural-language requests via Slack mentions, reasons over multiple external data sources (Google Drive, GitHub, curated web URLs), and returns synthesized responses within the Slack thread.
 
 ### Goals
 
-- Present the agent as "Squirrel", a recognizable bot user with its own avatar in Slack channels
+- Present the agent as a recognizable bot user (display name set by `AGENT_NAME`, default `Squirrel`) with its own avatar in Slack channels
 - Incorporate Slack thread history so the bot maintains conversational context within a thread
 - Enable the agent to search and read Google Drive documents (service account auth)
 - Enable the agent to query GitHub repositories, issues, and pull requests
@@ -115,9 +115,9 @@ Squirrel is an AI agent that operates as a named member of a Slack workspace. It
 
 | Setting | Value |
 |---|---|
-| App Name | Squirrel |
-| Bot Display Name | Squirrel |
-| Default Username | squirrel |
+| App Name | Your `AGENT_NAME` value (e.g. `Squirrel`) |
+| Bot Display Name | Your `AGENT_NAME` value (e.g. `Squirrel`) |
+| Default Username | lowercase of your app name (e.g. `squirrel`) |
 | App Icon | Custom avatar PNG (512×512) |
 | Event Subscriptions | `app_mention`, `message.channels` (for thread replies) |
 | Request URL | Lambda function URL or API Gateway endpoint |
@@ -249,8 +249,8 @@ Authorization: Bearer xoxb-<SLACK_BOT_TOKEN>
 
 ### Setup Steps
 
-1. `api.slack.com/apps` → Create New App (From Scratch) → name "Squirrel"
-2. App Home → enable Bot User → Display Name: `Squirrel`, Username: `squirrel`
+1. `api.slack.com/apps` → Create New App (From Scratch) → name it your `AGENT_NAME` value (e.g. `Squirrel`)
+2. App Home → enable Bot User → Display Name: your `AGENT_NAME` value, Username: lowercase version
 3. Basic Information → upload avatar PNG
 4. OAuth & Permissions → add bot token scopes listed in §3.1
 5. Event Subscriptions → enable → set Request URL to Lambda endpoint → subscribe to `app_mention`
