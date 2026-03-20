@@ -79,7 +79,8 @@ jobs:
       github.event_name == 'issue_comment' &&
       github.event.action == 'created' &&
       !github.event.issue.pull_request &&
-      contains(github.event.issue.labels.*.name, 'claude')
+      contains(github.event.issue.labels.*.name, 'claude') &&
+      github.event.comment.user.login != vars.BOT_ACTOR
     permissions:
       contents: write
       issues: write
@@ -196,6 +197,11 @@ jobs:
       cancel-in-progress: false
 
     steps:
+      - name: Warn if BOT_ACTOR is unset
+        if: vars.BOT_ACTOR == ''
+        run: |
+          echo "::warning::BOT_ACTOR repository variable is not set. The bot comment loop guard is inactive — the agent may respond to its own comments. Configure BOT_ACTOR in Settings → Variables."
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
