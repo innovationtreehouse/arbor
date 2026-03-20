@@ -161,7 +161,7 @@ jobs:
           settings: |
             {
               "permissions": {
-                "allow": ["Bash(gh pr review *)", "Bash(gh pr comment *)"]
+                "allow": ["Bash(gh pr review *)"]
               }
             }
 
@@ -179,9 +179,11 @@ jobs:
     if: >
       (github.event_name == 'issue_comment' &&
        github.event.action == 'created' &&
-       github.event.issue.pull_request) ||
+       github.event.issue.pull_request &&
+       github.event.comment.user.login != vars.BOT_ACTOR) ||
       (github.event_name == 'pull_request_review_comment' &&
-       github.event.action == 'created')
+       github.event.action == 'created' &&
+       github.event.comment.user.login != vars.BOT_ACTOR)
     permissions:
       contents: write
       pull-requests: write
