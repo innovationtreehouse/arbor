@@ -271,7 +271,8 @@ async function main() {
     const prNumber = event.workflow_run.pull_requests?.[0]?.number;
     if (prNumber) {
       const pr = await ghGet(`/pulls/${prNumber}`);
-      if (!pr.head.ref.startsWith('claude/')) {
+      const hasLabel = pr.labels.some((l) => l.name === 'claude');
+      if (!pr.head.ref.startsWith('claude/') && hasLabel) {
         const diff = await ghGet(`/pulls/${prNumber}`, {
           accept: 'application/vnd.github.diff',
           raw:    true,

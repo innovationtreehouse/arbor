@@ -134,6 +134,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      statuses: write
     concurrency:
       group: >-
         claude-pr-review-${{
@@ -153,6 +154,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
 
       - name: Run Claude
+        id: claude
         if: steps.prompt.outputs.skip != 'true'
         uses: anthropics/claude-code-action@v1
         with:
@@ -165,6 +167,27 @@ jobs:
                 "allow": ["Bash(gh pr review *)"]
               }
             }
+
+      - name: Report review status
+        if: always() && steps.prompt.outputs.skip != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
+          OUTCOME: ${{ steps.claude.outcome }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$OUTCOME" = "success" ]; then
+            STATE=success
+            DESC="Code review posted"
+          else
+            STATE=failure
+            DESC="Code review failed"
+          fi
+          gh api "repos/$REPO/statuses/$SHA" \
+            -f state="$STATE" \
+            -f context="claude/pr-review" \
+            -f description="$DESC" \
+            --silent
 
   # ---------------------------------------------------------------------------
   # Comment on Claude's own PR → address the feedback
