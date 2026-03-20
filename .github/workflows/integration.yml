@@ -8,6 +8,8 @@ jobs:
   integration:
     name: Integration Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     services:
       postgres:
