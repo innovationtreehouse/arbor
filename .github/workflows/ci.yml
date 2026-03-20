@@ -60,7 +60,6 @@ jobs:
       AWS_REGION: us-east-1
       SLACK_BOT_TOKEN: xoxb-not-real
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -73,21 +72,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Create database schema
-        run: |
-          psql $DATABASE_URL <<'SQL'
-          CREATE TABLE IF NOT EXISTS url_config (
-            url         TEXT PRIMARY KEY,
-            description TEXT        NOT NULL,
-            enabled     BOOLEAN     NOT NULL DEFAULT TRUE,
-            added_by    TEXT        NOT NULL,
-            added_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
-          CREATE TABLE IF NOT EXISTS agent_config (
-            key   TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-          );
-          SQL
+      - name: Run database migrations
+        run: cd packages/db && npm run db:migrate
 
       - name: Build packages
         run: npm run build

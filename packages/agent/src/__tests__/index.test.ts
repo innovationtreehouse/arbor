@@ -39,6 +39,8 @@ vi.mock("../prompt.js", () => ({
 
 const sqsMock = mockClient(SQSClient);
 
+process.env.DATABASE_URL = "postgres://localhost/test";
+
 const { fetchThreadHistory, postMessage, postEphemeral } = await import("../slack.js");
 const { runAgent } = await import("../agent.js");
 const { buildPrompt, buildSystemPrompt } = await import("../prompt.js");

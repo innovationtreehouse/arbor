@@ -27,19 +27,7 @@ until docker exec "$CONTAINER" pg_isready -U postgres >/dev/null 2>&1; do
   sleep 1
 done
 
-docker exec "$CONTAINER" psql -U postgres -d arbor_test -c "
-  CREATE TABLE IF NOT EXISTS url_config (
-    url         TEXT PRIMARY KEY,
-    description TEXT        NOT NULL,
-    enabled     BOOLEAN     NOT NULL DEFAULT TRUE,
-    added_by    TEXT        NOT NULL,
-    added_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  );
-  CREATE TABLE IF NOT EXISTS agent_config (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-  );
-"
+DATABASE_URL="$DB_URL" npm run --prefix packages/db db:migrate
 
 DATABASE_URL="$DB_URL" \
 AWS_REGION=us-east-1 \
