@@ -16,7 +16,7 @@ export async function runAgent(
   for await (const message of query({
     prompt,
     options: {
-      model: model ?? process.env.MODEL ?? "claude-sonnet-4-6",
+      model: model ?? process.env.MODEL ?? "claude-opus-4-6",
       systemPrompt,
       mcpServers: {
         gdrive: {

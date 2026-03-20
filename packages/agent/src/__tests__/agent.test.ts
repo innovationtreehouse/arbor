@@ -68,7 +68,7 @@ describe("runAgent", () => {
     delete process.env.MODEL;
   });
 
-  it("falls back to claude-sonnet-4-6 when MODEL is not set", async () => {
+  it("falls back to claude-opus-4-6 when MODEL is not set", async () => {
     delete process.env.MODEL;
     vi.mocked(query).mockReturnValue(
       (async function* () {
@@ -79,7 +79,7 @@ describe("runAgent", () => {
     await runAgent("prompt", "system");
 
     const callArgs = vi.mocked(query).mock.calls[0][0];
-    expect(callArgs.options?.model).toBe("claude-sonnet-4-6");
+    expect(callArgs.options?.model).toBe("claude-opus-4-6");
   });
 
   it("includes gdrive, github, and urlFetcher MCP servers", async () => {
