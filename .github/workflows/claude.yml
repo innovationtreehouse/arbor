@@ -186,8 +186,9 @@ jobs:
           PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
           REPO: ${{ github.repository }}
         run: |
-          review_count=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-            --json reviews --jq '.reviews | length')
+          review_count=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json reviews \
+            | jq --arg actor "$BOT_ACTOR" \
+                '[.reviews[] | select(.author.login == $actor)] | length')
           if [ "$OUTCOME" = "success" ] && [ "$review_count" -gt 0 ]; then
             STATE=success
             DESC="Code review posted"
