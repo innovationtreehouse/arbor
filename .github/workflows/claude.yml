@@ -115,7 +115,7 @@ jobs:
                 "allow": [
                   "Bash(git fetch *)", "Bash(git checkout *)",
                   "Bash(git add *)", "Bash(git commit *)", "Bash(git push *)",
-                  "Bash(gh issue comment *)"
+                  "Bash(gh issue comment *)","Edit()", "Write()","Grep()","Glob()"
                 ]
               }
             }
@@ -178,7 +178,7 @@ jobs:
           settings: |
             {
               "permissions": {
-                "allow": ["Bash(gh pr review *)", "Bash(gh pr edit *)"]
+                "allow": ["Bash(gh pr review *)", "Bash(gh pr edit *)","Grep()","Glob()"]
               }
             }
 
@@ -280,7 +280,7 @@ jobs:
                 "allow": [
                   "Bash(git fetch *)", "Bash(git checkout *)",
                   "Bash(git add *)", "Bash(git commit *)", "Bash(git push *)",
-                  "Bash(gh pr review *)", "Bash(gh pr comment *)"
+                  "Bash(gh pr review *)", "Bash(gh pr comment *)","Grep()","Glob()"
                 ]
               }
             }
