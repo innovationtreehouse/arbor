@@ -152,6 +152,11 @@ jobs:
       cancel-in-progress: true
 
     steps:
+      - name: Warn if BOT_ACTOR is unset
+        if: vars.BOT_ACTOR == ''
+        run: |
+          echo "::warning::BOT_ACTOR repository variable is not set. The claude/pr-review status check will always report failure because review authorship cannot be verified. Configure BOT_ACTOR in Settings → Variables."
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -188,10 +193,14 @@ jobs:
         run: |
           review_count=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json reviews \
             | jq --arg actor "$BOT_ACTOR" \
-                '[.reviews[] | select(.author.login == $actor)] | length')
+                '[.reviews[] | select(.author.login == $actor)] | length' \
+            2>/dev/null) || review_count=0
           if [ "$OUTCOME" = "success" ] && [ "$review_count" -gt 0 ]; then
             STATE=success
             DESC="Code review posted"
+          elif [ "$OUTCOME" = "success" ]; then
+            STATE=failure
+            DESC="Review not posted by bot"
           else
             STATE=failure
             DESC="Code review failed"
