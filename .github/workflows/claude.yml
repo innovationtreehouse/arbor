@@ -8,7 +8,7 @@ on:
   pull_request_review_comment:
     types: [created]
   pull_request:
-    types: [labeled]
+    types: [labeled, synchronize]
   workflow_run:
     workflows: ["CI"]
     types: [completed]
@@ -58,7 +58,6 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
           prompt:     ${{ steps.prompt.outputs.prompt }}
-          claude_args: "--allowedTools Edit,Read,Write,Bash,Grep,Glob"
           settings: |
             {
               "permissions": {
@@ -110,7 +109,6 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
           prompt:     ${{ steps.prompt.outputs.prompt }}
-          claude_args: "--allowedTools Edit,Read,Write"
           settings: |
             {
               "permissions": {
@@ -222,6 +220,64 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.AGENT_TOKEN }}
           PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+
+  # ---------------------------------------------------------------------------
+  # PR synchronize (new commits pushed) → clear status, check prior concerns
+  # ---------------------------------------------------------------------------
+
+  claude-pr-synchronize:
+    name: Check prior comments after synchronize
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.action == 'synchronize' &&
+      contains(github.event.pull_request.labels.*.name, 'claude') &&
+      !startsWith(github.event.pull_request.head.ref, 'claude/')
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+    concurrency:
+      group: claude-pr-synchronize-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Clear pr-review status
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$REPO/statuses/$SHA" \
+            -f state="pending" \
+            -f context="claude/pr-review" \
+            -f description="Re-checking after new commits" \
+            --silent
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build prompt
+        id: prompt
+        run: node scripts/build-claude-prompt.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
+
+      - name: Run Claude
+        if: steps.prompt.outputs.skip != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
+          github_token:      ${{ secrets.AGENT_TOKEN }}
+          prompt:            ${{ steps.prompt.outputs.prompt }}
+          settings: |
+            {
+              "permissions": {
+                "allow": ["Bash(gh pr comment *)","Grep()","Glob()"]
+              }
+            }
 
   # ---------------------------------------------------------------------------
   # Comment on Claude's own PR → address the feedback
