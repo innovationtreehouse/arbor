@@ -90,7 +90,7 @@ jobs:
       pull-requests: write
     concurrency:
       group: claude-label-reminder-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
+      cancel-in-progress: true
 
     steps:
       - name: Post reminder if not already posted
