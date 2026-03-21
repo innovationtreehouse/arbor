@@ -7,6 +7,8 @@ on:
     types: [created]
   pull_request_review_comment:
     types: [created]
+  pull_request:
+    types: [labeled]
   workflow_run:
     workflows: ["CI"]
     types: [completed]
@@ -127,19 +129,26 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     if: >
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.pull_requests[0] != null &&
-      !startsWith(github.event.workflow_run.head_branch, 'claude/')
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.pull_requests[0] != null &&
+       !startsWith(github.event.workflow_run.head_branch, 'claude/')) ||
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'labeled' &&
+       github.event.label.name == 'claude' &&
+       !startsWith(github.event.pull_request.head.ref, 'claude/'))
     permissions:
       contents: read
       pull-requests: write
       statuses: write
+      issues: write
     concurrency:
       group: >-
         claude-pr-review-${{
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.number ||
           github.event.workflow_run.pull_requests[0].number
-        }}-${{ github.event.workflow_run.head_sha }}
+        }}
       cancel-in-progress: true
 
     steps:
@@ -164,7 +173,7 @@ jobs:
           settings: |
             {
               "permissions": {
-                "allow": ["Bash(gh pr review *)"]
+                "allow": ["Bash(gh pr review *)", "Bash(gh pr edit *)"]
               }
             }
 
@@ -188,6 +197,16 @@ jobs:
             -f context="claude/pr-review" \
             -f description="$DESC" \
             --silent
+
+      - name: Apply reviewed label
+        if: steps.claude.conclusion == 'success' && steps.prompt.outputs.skip != 'true'
+        run: |
+          gh label create reviewed --color "0075ca" --description "Reviewed by Claude" \
+            --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label reviewed
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_TOKEN }}
+          PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
 
   # ---------------------------------------------------------------------------
   # Comment on Claude's own PR → address the feedback

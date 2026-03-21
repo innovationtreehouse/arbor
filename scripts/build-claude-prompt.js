@@ -266,6 +266,17 @@ async function main() {
       }
     }
 
+  } else if (EVENT_NAME === 'pull_request' && event.action === 'labeled') {
+    // PR labeled — if the 'claude' label was applied, run a review
+    if (event.label.name === 'claude' && !event.pull_request.head.ref.startsWith('claude/')) {
+      const pr = event.pull_request;
+      const diff = await ghGet(`/pulls/${pr.number}`, {
+        accept: 'application/vnd.github.diff',
+        raw:    true,
+      });
+      prompt = prReviewPrompt(pr, diff);
+    }
+
   } else if (EVENT_NAME === 'workflow_run') {
     // PR review — triggered after CI completes on a pull_request event
     const prNumber = event.workflow_run.pull_requests?.[0]?.number;
