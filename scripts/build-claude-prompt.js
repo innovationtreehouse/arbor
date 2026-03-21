@@ -241,8 +241,10 @@ async function main() {
   const event = JSON.parse(fs.readFileSync(EVENT_PATH, 'utf8'));
   let prompt  = null;
 
-  if (EVENT_NAME === 'issues' && event.action === 'opened') {
-    // New issue — propose an implementation in a PR
+  if (EVENT_NAME === 'issues' &&
+      (event.action === 'opened' || event.action === 'labeled') &&
+      event.issue.labels.some((l) => l.name === 'claude')) {
+    // New issue or newly-labeled issue — propose an implementation in a PR
     prompt = issuePrompt(event.issue);
 
   } else if (EVENT_NAME === 'issue_comment' && event.action === 'created') {
