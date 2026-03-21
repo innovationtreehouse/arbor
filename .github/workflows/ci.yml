@@ -88,6 +88,9 @@ jobs:
     if: github.event_name == 'pull_request'
     permissions:
       pull-requests: write
+    concurrency:
+      group: claude-label-reminder-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
 
     steps:
       - name: Post reminder if not already posted
@@ -101,8 +104,11 @@ jobs:
             --json comments \
             | jq -r --arg m "$MARKER" \
                 '[.comments[] | select(.body | contains($m))] | length')
+          has_label=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+            --json labels \
+            --jq '[.labels[].name] | contains(["claude"]) | if . then 1 else 0 end')
 
-          if [ "$already_posted" -eq 0 ]; then
+          if [ "$already_posted" -eq 0 ] && [ "$has_label" -eq 0 ]; then
             gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
               "${MARKER}
           Add the \`claude\` label to this PR to request an automated code review. The \`claude/pr-review\` status check will not pass until the label is added and the review has run."
