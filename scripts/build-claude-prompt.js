@@ -204,6 +204,48 @@ Your review should cover:
 Note both strengths and concerns.  Do not approve or request-changes — comment only.`;
 }
 
+function prSynchronizePrompt(pr, priorComments, diff) {
+  const commentsText = priorComments
+    .map((c) => `**${c.user.login}** (${c.created_at}):\n${c.body.trim()}`)
+    .join('\n\n---\n\n');
+
+  const chunk = diff.length > 8000
+    ? diff.slice(0, 8000) + '\n\n... (diff truncated at 8 000 chars)'
+    : diff;
+
+  return `\
+You are a code reviewer for the ${REPO_NAME} repository.
+
+PR #${pr.number}: ${pr.title}
+Author: ${pr.user.login}
+Branch: \`${pr.head.ref}\` → \`${pr.base.ref}\`
+URL: ${pr.html_url}
+
+New commits have been pushed to this PR. Your task is strictly limited in scope:
+assess whether the new changes address the concerns raised in prior review comments.
+
+Prior review comments:
+${commentsText}
+
+New diff:
+\`\`\`diff
+${chunk}
+\`\`\`
+
+Your task:
+1. For each prior concern, determine whether it has been addressed by the new changes.
+2. If the new changes substantially exceed just addressing review comments
+   (e.g. significant new features or large-scale refactoring unrelated to the comments),
+   flag that fact but do NOT review the out-of-scope changes.
+3. Post a single comment summarising your findings:
+   gh pr comment ${pr.number} --body "<your comment>"
+
+Important constraints:
+- Do NOT perform a full code review.
+- Do NOT approve or request changes — post a comment only.
+- Do NOT read or analyse files beyond what is provided above.`;
+}
+
 function prCommentPrompt(pr, comment, filePath) {
   const location = filePath ? `on \`${filePath}\`` : 'on the pull request';
 
@@ -266,6 +308,32 @@ async function main() {
       if (pr.head.ref.startsWith('claude/')) {
         prompt = prCommentPrompt(pr, event.comment, null);
       }
+    }
+
+  } else if (EVENT_NAME === 'pull_request' && event.action === 'synchronize') {
+    // New commits pushed — limited review: check if prior concerns are addressed
+    const pr = event.pull_request;
+    if (!pr.head.ref.startsWith('claude/') && pr.labels.some((l) => l.name === 'claude')) {
+      const [reviews, issueComments, diff] = await Promise.all([
+        ghGet(`/pulls/${pr.number}/reviews`),
+        ghGet(`/issues/${pr.number}/comments`),
+        ghGet(`/pulls/${pr.number}`, { accept: 'application/vnd.github.diff', raw: true }),
+      ]);
+      // Combine review bodies and timeline comments, excluding bot comments
+      const allComments = [
+        ...reviews
+          .filter((r) => r.body?.trim() &&
+            r.user.login !== BOT_ACTOR &&
+            r.user.type !== 'Bot')
+          .map((r) => ({ user: r.user, body: r.body, created_at: r.submitted_at })),
+        ...issueComments
+          .filter((c) => c.user.login !== BOT_ACTOR && c.user.type !== 'Bot')
+          .map((c) => ({ user: c.user, body: c.body, created_at: c.created_at })),
+      ].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      if (allComments.length > 0) {
+        prompt = prSynchronizePrompt(pr, allComments, diff);
+      }
+      // If no prior comments, skip — nothing to check against
     }
 
   } else if (EVENT_NAME === 'pull_request' && event.action === 'labeled') {
