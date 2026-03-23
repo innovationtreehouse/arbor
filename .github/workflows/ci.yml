@@ -56,6 +56,10 @@ jobs:
         run: npm ci
 
       - name: Run SQLite developer-flow tests
+        # Runs vitest with a path filter of packages/db, scoped further by
+        # vitest.integration.config.ts which already limits to *.integration.test.ts.
+        # Result: only packages/db SQLite integration tests run — no unit tests,
+        # no other packages.
         run: npm run test:dev
 
   integration:
