@@ -14,7 +14,7 @@ export async function runAgent(
       const base = Math.min(1000 * 2 ** (attempt - 1), 10_000);
       const delayMs = base * (1 + Math.random() * 0.1);
       console.warn(
-        `[agent] attempt ${attempt} failed (${lastError?.message}), retrying in ${Math.round(delayMs)}ms`
+        `[agent] attempt ${attempt}/${maxRetries + 1} failed (${lastError?.message}), retrying in ${Math.round(delayMs)}ms`
       );
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
@@ -33,9 +33,16 @@ export async function runAgent(
 function isTransientError(err: Error): boolean {
   const msg = err.message.toLowerCase();
   return (
-    !msg.includes("authentication_error") &&
-    !msg.includes("permission_error") &&
-    !msg.includes("invalid_api_key")
+    msg.includes("timeout") ||
+    msg.includes("timed out") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("connection") ||
+    msg.includes("socket") ||
+    msg.includes("network") ||
+    msg.includes("overloaded") ||
+    msg.includes("rate_limit") ||
+    msg.includes("server_error")
   );
 }
 

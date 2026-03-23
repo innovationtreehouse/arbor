@@ -135,12 +135,12 @@ describe("runAgent", () => {
   it("throws after exhausting all retries", async () => {
     vi.useFakeTimers();
     vi.mocked(query).mockImplementation(async function* () {
-      throw new Error("persistent failure");
+      throw new Error("connection timeout");
     });
 
     const resultPromise = runAgent("prompt", "system");
     // Attach rejection handler before advancing timers to avoid unhandled rejection
-    const assertion = expect(resultPromise).rejects.toThrow("persistent failure");
+    const assertion = expect(resultPromise).rejects.toThrow("connection timeout");
     await vi.runAllTimersAsync();
     await assertion;
     // default MAX_MCP_RETRIES=2 → 3 total attempts
@@ -152,11 +152,11 @@ describe("runAgent", () => {
     process.env.MAX_MCP_RETRIES = "0";
     vi.useFakeTimers();
     vi.mocked(query).mockImplementation(async function* () {
-      throw new Error("fail");
+      throw new Error("ECONNRESET");
     });
 
     const resultPromise = runAgent("prompt", "system");
-    const assertion = expect(resultPromise).rejects.toThrow("fail");
+    const assertion = expect(resultPromise).rejects.toThrow("ECONNRESET");
     await vi.runAllTimersAsync();
     await assertion;
     expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
@@ -169,11 +169,11 @@ describe("runAgent", () => {
     vi.spyOn(Math, "random").mockReturnValue(0); // eliminate jitter for exact assertions
 
     vi.mocked(query).mockImplementation(async function* () {
-      throw new Error("transient");
+      throw new Error("socket hang up");
     });
 
     const resultPromise = runAgent("prompt", "system"); // MAX_MCP_RETRIES=2 default
-    const assertion = expect(resultPromise).rejects.toThrow("transient");
+    const assertion = expect(resultPromise).rejects.toThrow("socket hang up");
 
     // Flush initial attempt
     await vi.advanceTimersByTimeAsync(0);
