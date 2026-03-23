@@ -76,6 +76,7 @@ jobs:
       - name: Build Lambda zip
         run: |
           npm run build
+          test -d packages/lambda/dist || { echo "packages/lambda/dist not found — build may have failed"; exit 1; }
           cd packages/lambda/dist && zip -r ../lambda.zip .
 
       - name: Upload Lambda zip to S3
@@ -87,15 +88,22 @@ jobs:
             s3://$BUCKET/arbor-webhook/$SHA.zip
 
       - name: Run database migrations (dev)
+        # Migrations run before code deploy. If a subsequent step fails and you
+        # need to roll back, Drizzle has no built-in down migrations — revert by
+        # applying a new migration that undoes the schema change.
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL_DEV }}
         run: cd packages/db && npm run db:migrate
 
       - name: Deploy Lambda (dev)
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          BUCKET: ${{ secrets.LAMBDA_ARTIFACT_BUCKET }}
         run: |
           aws lambda update-function-code \
             --function-name arbor-webhook-dev \
-            --zip-file fileb://packages/lambda/lambda.zip
+            --s3-bucket $BUCKET \
+            --s3-key arbor-webhook/$SHA.zip
 
       - name: Wait for Lambda update (dev)
         run: aws lambda wait function-updated --function-name arbor-webhook-dev

@@ -91,15 +91,22 @@ jobs:
             packages/lambda/lambda.zip
 
       - name: Run database migrations (prod)
+        # Migrations run before code deploy. If a subsequent step fails and you
+        # need to roll back, Drizzle has no built-in down migrations — revert by
+        # applying a new migration that undoes the schema change.
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL_PROD }}
         run: cd packages/db && npm run db:migrate
 
       - name: Deploy Lambda (prod)
+        env:
+          SHA: ${{ inputs.sha }}
+          BUCKET: ${{ secrets.LAMBDA_ARTIFACT_BUCKET }}
         run: |
           aws lambda update-function-code \
             --function-name arbor-webhook-prod \
-            --zip-file fileb://packages/lambda/lambda.zip
+            --s3-bucket $BUCKET \
+            --s3-key arbor-webhook/$SHA.zip
 
       - name: Wait for Lambda update (prod)
         run: aws lambda wait function-updated --function-name arbor-webhook-prod
