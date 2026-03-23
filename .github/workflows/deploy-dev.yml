@@ -1,0 +1,93 @@
+name: Deploy to Dev
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-dev:
+    name: deploy / dev
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials (dev)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_DEV }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          SHA: ${{ github.sha }}
+        run: |
+          docker build -t $REGISTRY/arbor-agent:$SHA \
+                       -t $REGISTRY/arbor-agent:dev \
+                       -f packages/agent/Dockerfile .
+          docker push $REGISTRY/arbor-agent:$SHA
+          docker push $REGISTRY/arbor-agent:dev
+
+      - name: Build Lambda zip
+        run: |
+          npm run build
+          cd packages/lambda/dist && zip -r ../lambda.zip .
+
+      - name: Run database migrations (dev)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_DEV }}
+        run: cd packages/db && npm run db:migrate
+
+      - name: Deploy Lambda (dev)
+        run: |
+          aws lambda update-function-code \
+            --function-name arbor-webhook-dev \
+            --zip-file fileb://packages/lambda/lambda.zip
+
+      - name: Register ECS task definition (dev)
+        env:
+          SHA: ${{ github.sha }}
+          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition arbor-agent-dev \
+            --query taskDefinition \
+          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:$SHA" \
+              'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                   .compatibilities, .registeredAt, .registeredBy)
+               | .containerDefinitions[0].image = $img' \
+          > /tmp/task-def.json
+          aws ecs register-task-definition --cli-input-json file:///tmp/task-def.json
+
+      - name: Smoke test (dev)
+        env:
+          API_URL: ${{ secrets.API_URL_DEV }}
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API_URL/slack/events" \
+            -H "Content-Type: application/json" \
+            -H "x-slack-request-timestamp: $(date +%s)" \
+            -H "x-slack-signature: v0=badhash" \
+            -d '{}')
+          if [ "$STATUS" != "401" ]; then
+            echo "Smoke test failed: expected 401, got $STATUS"
+            exit 1
+          fi
+          echo "Smoke test passed."

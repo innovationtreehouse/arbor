@@ -1,0 +1,97 @@
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Git SHA to promote (must be deployed to dev)"
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  promote:
+    name: promote ${{ inputs.sha }} to prod
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials (prod)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_PROD }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Verify image exists and re-tag as prod
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          docker pull $REGISTRY/arbor-agent:$SHA
+          docker tag  $REGISTRY/arbor-agent:$SHA $REGISTRY/arbor-agent:prod
+          docker push $REGISTRY/arbor-agent:prod
+
+      - name: Run database migrations (prod)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_PROD }}
+        run: cd packages/db && npm run db:migrate
+
+      - name: Build Lambda zip
+        run: |
+          npm run build
+          cd packages/lambda/dist && zip -r ../lambda.zip .
+
+      - name: Deploy Lambda (prod)
+        run: |
+          aws lambda update-function-code \
+            --function-name arbor-webhook-prod \
+            --zip-file fileb://packages/lambda/lambda.zip
+
+      - name: Register ECS task definition (prod)
+        env:
+          SHA: ${{ inputs.sha }}
+          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition arbor-agent-prod \
+            --query taskDefinition \
+          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:$SHA" \
+              'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                   .compatibilities, .registeredAt, .registeredBy)
+               | .containerDefinitions[0].image = $img' \
+          > /tmp/task-def.json
+          aws ecs register-task-definition --cli-input-json file:///tmp/task-def.json
+
+      - name: Smoke test (prod)
+        env:
+          API_URL: ${{ secrets.API_URL_PROD }}
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API_URL/slack/events" \
+            -H "Content-Type: application/json" \
+            -H "x-slack-request-timestamp: $(date +%s)" \
+            -H "x-slack-signature: v0=badhash" \
+            -d '{}')
+          if [ "$STATUS" != "401" ]; then
+            echo "Smoke test failed: expected 401, got $STATUS"
+            exit 1
+          fi
+          echo "Smoke test passed."
