@@ -5,13 +5,14 @@ import {
   ListTasksCommand,
   RunTaskCommand,
 } from "@aws-sdk/client-ecs";
-import { PostgresUrlStore, PostgresConfigStore, type UrlStore, type ConfigStore } from "@arbor/db";
+import { PostgresUrlStore, PostgresConfigStore, PostgresAuditStore, type UrlStore, type ConfigStore, type AuditStore } from "@arbor/db";
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
 
 const sqsClient = new SQSClient({});
 const ecsClient = new ECSClient({});
 const store: UrlStore = new PostgresUrlStore(process.env.DATABASE_URL!);
 const configStore: ConfigStore = new PostgresConfigStore(process.env.DATABASE_URL!);
+const auditStore: AuditStore = new PostgresAuditStore(process.env.DATABASE_URL!);
 const AGENT_NAME = process.env.AGENT_NAME ?? "Squirrel";
 
 // ---------------------------------------------------------------------------
@@ -169,6 +170,10 @@ async function handleCommand(rawBody: string) {
       return handleTest(args);
     case "model":
       return handleModel(args);
+    case "audit":
+      return handleAudit(args);
+    case "audit-thread":
+      return handleAuditThread(args);
     default:
       return ephemeral(
         `*${AGENT_NAME} Admin Commands:*\n` +
@@ -177,6 +182,8 @@ async function handleCommand(rawBody: string) {
           "• `/squirrel-admin remove <url>` — remove a URL\n" +
           "• `/squirrel-admin test <url>` — preview URL content\n" +
           "• `/squirrel-admin model [<model-id>]` — show or set the active Claude model\n" +
+          "• `/squirrel-admin audit [<limit>]` — show recent agent interactions\n" +
+          "• `/squirrel-admin audit-thread <channel> <thread_ts>` — show interactions for a thread\n" +
           "• `/squirrel-admin help` — show this message"
       );
   }
@@ -276,6 +283,45 @@ async function handleModel(args: string[]) {
   const model = args[0];
   await configStore.set("model", model);
   return ephemeral(`✅ Model set to \`${model}\`. Takes effect on the next message.`);
+}
+
+async function handleAudit(args: string[]) {
+  const limit = Math.min(parseInt(args[0] ?? "10", 10) || 10, 50);
+  const records = await auditStore.listRecent(limit);
+
+  if (records.length === 0) {
+    return ephemeral("No audit records found.");
+  }
+
+  const lines = records.map((r) => {
+    const ts = new Date(r.created_at).toISOString().replace("T", " ").slice(0, 19);
+    const model = r.model ?? "default";
+    const summary = r.prompt.slice(0, 80).replace(/\n/g, " ");
+    return `• \`${ts}\` <@${r.user_id}> in <#${r.channel}> (${r.duration_ms}ms, ${model})\n  _${summary}${r.prompt.length > 80 ? "…" : ""}_`;
+  });
+
+  return ephemeral(`*Recent interactions (${records.length}):*\n${lines.join("\n")}`);
+}
+
+async function handleAuditThread(args: string[]) {
+  if (args.length < 2) {
+    return ephemeral("Usage: `/squirrel-admin audit-thread <channel> <thread_ts>`");
+  }
+
+  const [channel, thread_ts] = args;
+  const records = await auditStore.listByThread(channel, thread_ts);
+
+  if (records.length === 0) {
+    return ephemeral("No audit records found for that thread.");
+  }
+
+  const lines = records.map((r) => {
+    const ts = new Date(r.created_at).toISOString().replace("T", " ").slice(0, 19);
+    const model = r.model ?? "default";
+    return `• \`${ts}\` <@${r.user_id}> (${r.duration_ms}ms, ${model})\n  *Prompt:* ${r.prompt.slice(0, 120).replace(/\n/g, " ")}${r.prompt.length > 120 ? "…" : ""}\n  *Response:* ${r.response.slice(0, 120).replace(/\n/g, " ")}${r.response.length > 120 ? "…" : ""}`;
+  });
+
+  return ephemeral(`*Thread interactions (${records.length}):*\n${lines.join("\n")}`);
 }
 
 function ephemeral(text: string) {
