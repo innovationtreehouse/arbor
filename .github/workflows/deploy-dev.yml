@@ -17,6 +17,10 @@ permissions:
   pull-requests: none
   statuses: none
 
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false  # queue rather than cancel — migrations must not interleave
+
 jobs:
   deploy-dev:
     name: deploy / dev
@@ -81,6 +85,9 @@ jobs:
             --function-name arbor-webhook-dev \
             --zip-file fileb://packages/lambda/lambda.zip
 
+      - name: Wait for Lambda update (dev)
+        run: aws lambda wait function-updated --function-name arbor-webhook-dev
+
       - name: Register ECS task definition (dev)
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
@@ -103,6 +110,12 @@ jobs:
             --cluster arbor-dev \
             --service arbor-agent-dev \
             --force-new-deployment
+
+      - name: Wait for ECS service to stabilize (dev)
+        run: |
+          aws ecs wait services-stable \
+            --cluster arbor-dev \
+            --services arbor-agent-dev
 
       - name: Smoke test (dev)
         env:
