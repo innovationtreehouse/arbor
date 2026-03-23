@@ -1,20 +1,32 @@
 name: Deploy to Dev
 
 on:
-  push:
+  # Only deploy when CI passes — prevents a broken push to main from deploying.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
 
 permissions:
-  id-token: write
-  contents: read
+  id-token: write   # required for OIDC → AWS
+  contents: read    # required for checkout
+  actions: none
+  checks: none
+  issues: none
+  packages: none
+  pull-requests: none
+  statuses: none
 
 jobs:
   deploy-dev:
     name: deploy / dev
     runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -37,7 +49,7 @@ jobs:
       - name: Build and push Docker image
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          SHA: ${{ github.sha }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           docker build -t $REGISTRY/arbor-agent:$SHA \
                        -t $REGISTRY/arbor-agent:dev \
@@ -52,7 +64,7 @@ jobs:
 
       - name: Upload Lambda zip to S3
         env:
-          SHA: ${{ github.sha }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
           BUCKET: ${{ secrets.LAMBDA_ARTIFACT_BUCKET }}
         run: |
           aws s3 cp packages/lambda/lambda.zip \
@@ -71,7 +83,7 @@ jobs:
 
       - name: Register ECS task definition (dev)
         env:
-          SHA: ${{ github.sha }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
           ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           REGION: ${{ secrets.AWS_REGION }}
         run: |

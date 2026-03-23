@@ -19,8 +19,10 @@ jobs:
 
     steps:
       - name: Validate SHA input
+        env:
+          SHA_INPUT: ${{ inputs.sha }}
         run: |
-          if ! echo "${{ inputs.sha }}" | grep -qE '^[0-9a-f]{40}$'; then
+          if ! echo "$SHA_INPUT" | grep -qE '^[0-9a-f]{40}$'; then
             echo "Invalid SHA: must be exactly 40 lowercase hex characters"
             exit 1
           fi
