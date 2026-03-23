@@ -42,6 +42,7 @@ The agent container also runs the `mcp-url-fetcher` MCP server in-process, which
 | `IDLE_TIMEOUT` | No | `15` | Minutes of SQS inactivity before the container calls `process.exit(0)` |
 | `THREAD_HISTORY_LIMIT` | No | `50` | Maximum number of prior Slack messages to include as thread context |
 | `URL_POLL_INTERVAL_S` | No | `60` | How often the URL Fetcher MCP server refreshes the allowlist from the database, in seconds |
+| `MAX_MCP_RETRIES` | No | `2` | Number of times to retry a failed `runAgent()` call before giving up; uses exponential backoff starting at 1s |
 
 ---
 

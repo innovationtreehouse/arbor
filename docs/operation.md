@@ -48,14 +48,15 @@ The agent container runs a tight SQS long-poll loop (20-second wait):
 2. It calls `conversations.replies` to fetch the full thread history (up to `THREAD_HISTORY_LIMIT` messages, default 50). This gives the agent context for the conversation.
 3. It builds a prompt from the thread history and the current message, then calls `runAgent()`.
 4. It posts the agent's response back to the same Slack thread via `chat.postMessage`.
-5. It deletes the SQS message to acknowledge processing.
+5. It writes an audit record to the `audit_log` table (channel, thread, user, prompt, response, model, duration). Audit write failures are logged but do not fail the event — the response is always posted first.
+6. It deletes the SQS message to acknowledge processing.
 6. Any message processing error is logged but does not crash the loop — the container keeps polling.
 
 If the loop receives no messages for `IDLE_TIMEOUT` minutes, the container calls `process.exit(0)` and ECS terminates it. The next mention will trigger Lambda to start a fresh container.
 
 ### 4. Agent reasoning
 
-`runAgent()` calls the Claude Agent SDK's `query()` function with three MCP servers attached:
+`runAgent()` calls the Claude Agent SDK's `query()` function with three MCP servers attached. If the call throws (e.g. an MCP server crashes or times out), `runAgent()` retries up to `MAX_MCP_RETRIES` times (default 2) with exponential backoff starting at 1 second, capped at 10 seconds. All three attempts failing causes the error to propagate to the SQS loop, which logs it and moves on to the next message.
 
 **Google Drive** (`@modelcontextprotocol/server-gdrive`)
 - Authenticates using a Google service account (`GOOGLE_CREDENTIALS` env var, JSON string).
@@ -91,6 +92,9 @@ The allowlist is managed through the `/squirrel-admin` Slack slash command. Only
 | `/squirrel-admin add <url> <description>` | Add a URL to the allowlist (must start with `https://`) |
 | `/squirrel-admin remove <url>` | Remove a URL |
 | `/squirrel-admin test <url>` | Fetch the URL and show a 500-character preview |
+| `/squirrel-admin model [<model-id>]` | Show or set the active Claude model |
+| `/squirrel-admin audit [<limit>]` | Show recent agent interactions (default 10, max 50) |
+| `/squirrel-admin audit-thread <channel> <thread_ts>` | Show all interactions for a specific thread |
 | `/squirrel-admin help` | Show command reference |
 
 All responses are ephemeral (visible only to the command sender). The `add` command enforces a configurable limit (`MAX_URL_COUNT`, default 100) to prevent runaway table growth. All URLs must use HTTPS.
@@ -119,9 +123,25 @@ CREATE TABLE url_config (
 
 The URL Fetcher MCP server queries only `enabled = true` rows via `PostgresUrlStore.listEnabled()`. Disabled URLs remain in the table and are visible in `/squirrel-admin list` but are not fetchable by the agent.
 
+The `audit_log` table records every agent interaction for operational visibility:
+
+```sql
+CREATE TABLE audit_log (
+  id          SERIAL PRIMARY KEY,
+  channel     TEXT        NOT NULL,
+  thread_ts   TEXT        NOT NULL,
+  user_id     TEXT        NOT NULL,
+  prompt      TEXT        NOT NULL,
+  response    TEXT        NOT NULL,
+  model       TEXT,
+  duration_ms INTEGER     NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
 #### Data access abstraction
 
-All database access goes through the `UrlStore` interface (`packages/db/src/store.ts`). `PostgresUrlStore` is the production implementation. This makes it straightforward to swap in a different backend (e.g. SQLite for local development) without touching application logic.
+All database access goes through typed store interfaces in `packages/db/src/store.ts` (`UrlStore`, `ConfigStore`, `AuditStore`). The `createStores(connectionString)` factory returns matching implementations: PostgreSQL for `postgres://` URLs, SQLite for everything else. This allows local development without a running database server.
 
 ---
 
