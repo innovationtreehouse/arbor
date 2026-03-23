@@ -28,3 +28,23 @@ export interface ConfigStore {
   /** Sets a key to the given value (upsert). */
   set(key: string, value: string): Promise<void>;
 }
+
+export interface AuditRecord {
+  id: number;
+  channel: string;
+  thread_ts: string;
+  user_id: string;
+  prompt: string;
+  response: string;
+  model: string | null;
+  duration_ms: number;
+  created_at: string; // ISO 8601
+}
+
+export type NewAuditRecord = Omit<AuditRecord, "id" | "created_at">;
+
+export interface AuditStore {
+  write(record: NewAuditRecord): Promise<void>;
+  listRecent(limit: number): Promise<AuditRecord[]>;
+  listByThread(channel: string, thread_ts: string): Promise<AuditRecord[]>;
+}
