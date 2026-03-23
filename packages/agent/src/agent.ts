@@ -11,9 +11,10 @@ export async function runAgent(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) {
-      const delayMs = Math.min(1000 * 2 ** (attempt - 1), 10_000);
+      const base = Math.min(1000 * 2 ** (attempt - 1), 10_000);
+      const delayMs = base * (1 + Math.random() * 0.1);
       console.warn(
-        `[agent] attempt ${attempt} failed (${lastError?.message}), retrying in ${delayMs}ms`
+        `[agent] attempt ${attempt} failed (${lastError?.message}), retrying in ${Math.round(delayMs)}ms`
       );
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
@@ -22,10 +23,20 @@ export async function runAgent(
       return await runAgentOnce(prompt, systemPrompt, model);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
+      if (!isTransientError(lastError)) throw lastError;
     }
   }
 
   throw lastError;
+}
+
+function isTransientError(err: Error): boolean {
+  const msg = err.message.toLowerCase();
+  return (
+    !msg.includes("authentication_error") &&
+    !msg.includes("permission_error") &&
+    !msg.includes("invalid_api_key")
+  );
 }
 
 async function runAgentOnce(

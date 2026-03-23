@@ -164,6 +164,57 @@ describe("runAgent", () => {
     vi.useRealTimers();
   });
 
+  it("uses exponential backoff delays: 1s for attempt 1, 2s for attempt 2", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0); // eliminate jitter for exact assertions
+
+    vi.mocked(query).mockImplementation(async function* () {
+      throw new Error("transient");
+    });
+
+    const resultPromise = runAgent("prompt", "system"); // MAX_MCP_RETRIES=2 default
+    const assertion = expect(resultPromise).rejects.toThrow("transient");
+
+    // Flush initial attempt
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
+
+    // 999ms — first retry not yet fired
+    await vi.advanceTimersByTimeAsync(999);
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
+
+    // 1ms more (= 1000ms base, jitter=0) — first retry fires
+    await vi.advanceTimersByTimeAsync(1);
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
+
+    // 1999ms — second retry not yet fired
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
+
+    // 1ms more (= 2000ms base, jitter=0) — second retry fires
+    await vi.advanceTimersByTimeAsync(1);
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(3);
+
+    await assertion;
+    vi.spyOn(Math, "random").mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("does not retry non-transient errors", async () => {
+    vi.useFakeTimers();
+    vi.mocked(query).mockImplementation(async function* () {
+      throw new Error("authentication_error: invalid credentials");
+    });
+
+    const resultPromise = runAgent("prompt", "system");
+    const assertion = expect(resultPromise).rejects.toThrow("authentication_error");
+    await vi.runAllTimersAsync();
+    await assertion;
+    // Should fail immediately without retrying
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
   it("passes DATABASE_URL to urlFetcher MCP env", async () => {
     process.env.DATABASE_URL = "postgres://localhost/test";
     vi.mocked(query).mockReturnValue(
