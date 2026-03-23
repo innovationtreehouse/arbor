@@ -23,16 +23,16 @@ afterAll(() => {
   if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
 });
 
-describe("SQLite stores — file-backed integration", () => {
+describe.skipIf(process.env.DATABASE_URL?.startsWith("postgres"))("SQLite stores — file-backed integration", () => {
   // ---------------------------------------------------------------------------
   // Schema auto-creation
   // ---------------------------------------------------------------------------
 
-  it("creates all tables on first open without a migration step", () => {
+  it("creates all tables on first open without a migration step", async () => {
     expect(fs.existsSync(dbPath)).toBe(false);
     const { urlStore } = createStores(dbPath);
     // If tables were not created the next call would throw
-    expect(urlStore.listAll()).resolves.toEqual([]);
+    await expect(urlStore.listAll()).resolves.toEqual([]);
     expect(fs.existsSync(dbPath)).toBe(true);
   });
 
