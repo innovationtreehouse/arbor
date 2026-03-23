@@ -6,6 +6,33 @@ export async function runAgent(
   systemPrompt: string,
   model?: string
 ): Promise<string> {
+  const maxRetries = parseInt(process.env.MAX_MCP_RETRIES ?? "2", 10);
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      const delayMs = Math.min(1000 * 2 ** (attempt - 1), 10_000);
+      console.warn(
+        `[agent] attempt ${attempt} failed (${lastError?.message}), retrying in ${delayMs}ms`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    try {
+      return await runAgentOnce(prompt, systemPrompt, model);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  throw lastError;
+}
+
+async function runAgentOnce(
+  prompt: string,
+  systemPrompt: string,
+  model?: string
+): Promise<string> {
   const urlFetcherPath = path.resolve(
     __dirname,
     "../../mcp-url-fetcher/dist/index.js"
