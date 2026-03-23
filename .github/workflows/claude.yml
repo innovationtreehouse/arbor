@@ -185,7 +185,8 @@ jobs:
             {
               "permissions": {
                 "allow": ["Bash(gh pr review *)", "Bash(gh pr edit *)","Grep()","Glob()"]
-              }
+              },
+              "maxThinkingTokens": 1024
             }
 
       - name: Report review status

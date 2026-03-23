@@ -201,7 +201,9 @@ Your review should cover:
 - Security considerations
 - Specific, actionable suggestions (reference file names and line numbers)
 
-Note both strengths and concerns.  Do not approve or request-changes — comment only.`;
+Note both strengths and concerns.  Do not approve or request-changes — comment only.
+
+Keep your review to 200 words or fewer.`;
 }
 
 function prSynchronizePrompt(pr, priorComments, diff) {
