@@ -3,7 +3,8 @@ import {
   ReceiveMessageCommand,
   DeleteMessageCommand,
 } from "@aws-sdk/client-sqs";
-import { PostgresConfigStore } from "@arbor/db";
+import { PostgresConfigStore, PostgresAuditStore } from "@arbor/db";
+import { createAuditLogger } from "@arbor/logger";
 import { fetchThreadHistory, postMessage, postEphemeral } from "./slack.js";
 import { runAgent } from "./agent.js";
 import { buildPrompt, buildSystemPrompt } from "./prompt.js";
@@ -21,6 +22,7 @@ if (!DATABASE_URL) throw new Error("DATABASE_URL is required");
 
 const sqsClient = new SQSClient({ region: process.env.AWS_REGION });
 const configStore = new PostgresConfigStore(DATABASE_URL);
+const auditLogger = createAuditLogger(new PostgresAuditStore(DATABASE_URL));
 const IDLE_TIMEOUT_MS =
   parseInt(process.env.IDLE_TIMEOUT ?? "15", 10) * 60 * 1000;
 const SQS_WAIT_SECONDS = 20;
@@ -31,8 +33,19 @@ export async function processEvent(event: SlackEvent): Promise<void> {
   const history = await fetchThreadHistory(event.channel, event.thread_ts);
   const prompt = buildPrompt(history, event.text);
   const systemPrompt = buildSystemPrompt();
+  const start = Date.now();
   const response = await runAgent(prompt, systemPrompt, model);
+  const duration_ms = Date.now() - start;
   await postMessage(event.channel, event.thread_ts, response);
+  await auditLogger.log({
+    channel: event.channel,
+    thread_ts: event.thread_ts,
+    user_id: event.user,
+    prompt,
+    response,
+    model: model ?? null,
+    duration_ms,
+  });
 }
 
 /* v8 ignore start */

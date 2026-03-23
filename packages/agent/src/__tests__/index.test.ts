@@ -8,7 +8,7 @@ import {
 import type { ConfigStore } from "@arbor/db";
 
 // ---------------------------------------------------------------------------
-// Mock @arbor/db before importing the module under test
+// Mock @arbor/db and @arbor/logger before importing the module under test
 // ---------------------------------------------------------------------------
 
 const mockConfigStore: ConfigStore = {
@@ -20,6 +20,14 @@ vi.mock("@arbor/db", () => ({
   PostgresConfigStore: vi.fn().mockImplementation(function () {
     return mockConfigStore;
   }),
+  PostgresAuditStore: vi.fn().mockImplementation(function () {
+    return {};
+  }),
+}));
+
+const mockAuditLog = vi.fn().mockResolvedValue(undefined);
+vi.mock("@arbor/logger", () => ({
+  createAuditLogger: vi.fn().mockReturnValue({ log: mockAuditLog }),
 }));
 
 vi.mock("../slack.js", () => ({
@@ -63,6 +71,7 @@ beforeEach(() => {
   vi.mocked(buildPrompt).mockClear();
   vi.mocked(buildSystemPrompt).mockClear();
   vi.mocked(mockConfigStore.get).mockResolvedValue(undefined);
+  mockAuditLog.mockClear();
 
   process.env.SQS_QUEUE_URL = "https://sqs.test/queue";
   process.env.AWS_REGION = "us-east-1";
@@ -113,5 +122,30 @@ describe("processEvent", () => {
   it("propagates errors from runAgent", async () => {
     vi.mocked(runAgent).mockRejectedValueOnce(new Error("Agent failed"));
     await expect(processEvent(baseEvent)).rejects.toThrow("Agent failed");
+  });
+
+  it("writes audit record with channel, user, model, and duration after posting response", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce("claude-opus-4-6");
+    vi.mocked(runAgent).mockResolvedValueOnce("The answer.");
+
+    await processEvent(baseEvent);
+
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "C_CHAN",
+        thread_ts: "1.0",
+        user_id: "U1",
+        response: "The answer.",
+        model: "claude-opus-4-6",
+      })
+    );
+    expect(typeof mockAuditLog.mock.calls[0][0].duration_ms).toBe("number");
+  });
+
+  it("writes audit record with null model when none is configured", async () => {
+    await processEvent(baseEvent);
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ model: null })
+    );
   });
 });
