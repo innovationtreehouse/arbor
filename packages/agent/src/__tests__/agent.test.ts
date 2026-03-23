@@ -114,6 +114,56 @@ describe("runAgent", () => {
     delete process.env.MODEL;
   });
 
+  it("retries on error and returns result on success after failures", async () => {
+    vi.useFakeTimers();
+    vi.mocked(query)
+      .mockImplementationOnce(async function* () { throw new Error("MCP timeout"); })
+      .mockReturnValue(
+        (async function* () {
+          yield { result: "recovered" };
+        })()
+      );
+
+    const resultPromise = runAgent("prompt", "system");
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+    expect(result).toBe("recovered");
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("throws after exhausting all retries", async () => {
+    vi.useFakeTimers();
+    vi.mocked(query).mockImplementation(async function* () {
+      throw new Error("persistent failure");
+    });
+
+    const resultPromise = runAgent("prompt", "system");
+    // Attach rejection handler before advancing timers to avoid unhandled rejection
+    const assertion = expect(resultPromise).rejects.toThrow("persistent failure");
+    await vi.runAllTimersAsync();
+    await assertion;
+    // default MAX_MCP_RETRIES=2 → 3 total attempts
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
+  it("respects MAX_MCP_RETRIES env var", async () => {
+    process.env.MAX_MCP_RETRIES = "0";
+    vi.useFakeTimers();
+    vi.mocked(query).mockImplementation(async function* () {
+      throw new Error("fail");
+    });
+
+    const resultPromise = runAgent("prompt", "system");
+    const assertion = expect(resultPromise).rejects.toThrow("fail");
+    await vi.runAllTimersAsync();
+    await assertion;
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
+    delete process.env.MAX_MCP_RETRIES;
+    vi.useRealTimers();
+  });
+
   it("passes DATABASE_URL to urlFetcher MCP env", async () => {
     process.env.DATABASE_URL = "postgres://localhost/test";
     vi.mocked(query).mockReturnValue(
