@@ -30,17 +30,17 @@ afterAll(() => {
   if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
 });
 
-describe("SQLite adapter — deployment environment simulation", () => {
+describe.skipIf(process.env.DATABASE_URL?.startsWith("postgres"))("SQLite adapter — deployment environment simulation", () => {
   // ---------------------------------------------------------------------------
   // Scenario 1: Lambda /add-url and /remove-url flows
   // ---------------------------------------------------------------------------
 
   describe("Lambda URL management flow", () => {
-    it("accepts a file: URI and creates the database automatically", () => {
+    it("accepts a file: URI and creates the database automatically", async () => {
       expect(fs.existsSync(dbPath)).toBe(false);
       const { urlStore } = createStores(dbUri);
       // listAll() would throw if schema wasn't created
-      expect(urlStore.listAll()).resolves.toEqual([]);
+      await expect(urlStore.listAll()).resolves.toEqual([]);
       expect(fs.existsSync(dbPath)).toBe(true);
     });
 
