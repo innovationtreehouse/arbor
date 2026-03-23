@@ -8,8 +8,14 @@ on:
         required: true
 
 permissions:
-  id-token: write
-  contents: read
+  id-token: write   # required for OIDC → AWS
+  contents: read    # required for checkout
+  actions: none
+  checks: none
+  issues: none
+  packages: none
+  pull-requests: none
+  statuses: none
 
 jobs:
   promote:
@@ -49,6 +55,19 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Verify SHA was deployed to dev
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          SHA_INPUT: ${{ inputs.sha }}
+        run: |
+          # Fail fast before migrations if this SHA was never built and pushed to dev
+          aws ecr describe-images \
+            --repository-name arbor-agent \
+            --image-ids imageTag=$SHA_INPUT \
+            --query 'imageDetails[0].imageTags' \
+            --output text
+          echo "SHA $SHA_INPUT confirmed in ECR."
+
       - name: Verify image exists and re-tag as prod
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
@@ -78,6 +97,9 @@ jobs:
             --function-name arbor-webhook-prod \
             --zip-file fileb://packages/lambda/lambda.zip
 
+      - name: Wait for Lambda update (prod)
+        run: aws lambda wait function-updated --function-name arbor-webhook-prod
+
       - name: Register ECS task definition (prod)
         env:
           SHA: ${{ inputs.sha }}
@@ -100,6 +122,12 @@ jobs:
             --cluster arbor-prod \
             --service arbor-agent-prod \
             --force-new-deployment
+
+      - name: Wait for ECS service to stabilize (prod)
+        run: |
+          aws ecs wait services-stable \
+            --cluster arbor-prod \
+            --services arbor-agent-prod
 
       - name: Smoke test (prod)
         env:
