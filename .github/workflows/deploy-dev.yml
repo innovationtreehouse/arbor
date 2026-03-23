@@ -50,6 +50,14 @@ jobs:
           npm run build
           cd packages/lambda/dist && zip -r ../lambda.zip .
 
+      - name: Upload Lambda zip to S3
+        env:
+          SHA: ${{ github.sha }}
+          BUCKET: ${{ secrets.LAMBDA_ARTIFACT_BUCKET }}
+        run: |
+          aws s3 cp packages/lambda/lambda.zip \
+            s3://$BUCKET/arbor-webhook/$SHA.zip
+
       - name: Run database migrations (dev)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL_DEV }}
@@ -77,10 +85,20 @@ jobs:
           > /tmp/task-def.json
           aws ecs register-task-definition --cli-input-json file:///tmp/task-def.json
 
+      - name: Update ECS service (dev)
+        run: |
+          aws ecs update-service \
+            --cluster arbor-dev \
+            --service arbor-agent-dev \
+            --force-new-deployment
+
       - name: Smoke test (dev)
         env:
           API_URL: ${{ secrets.API_URL_DEV }}
         run: |
+          # Intentionally sends a bad signature to verify the Lambda rejects
+          # unauthenticated requests — a 401 means the function is up and
+          # signature validation is working.
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API_URL/slack/events" \
             -H "Content-Type: application/json" \
             -H "x-slack-request-timestamp: $(date +%s)" \
