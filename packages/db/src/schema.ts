@@ -1,4 +1,4 @@
-import { pgTable, text, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, boolean, timestamp, serial, integer } from "drizzle-orm/pg-core";
 
 export const urlConfig = pgTable("url_config", {
   url: text("url").primaryKey(),
@@ -11,4 +11,16 @@ export const urlConfig = pgTable("url_config", {
 export const agentConfig = pgTable("agent_config", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
+});
+
+export const auditLog = pgTable("audit_log", {
+  id: serial("id").primaryKey(),
+  channel: text("channel").notNull(),
+  thread_ts: text("thread_ts").notNull(),
+  user_id: text("user_id").notNull(),
+  prompt: text("prompt").notNull(),
+  response: text("response").notNull(),
+  model: text("model"),
+  duration_ms: integer("duration_ms").notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
