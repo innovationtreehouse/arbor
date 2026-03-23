@@ -7,7 +7,7 @@ import {
   RunTaskCommand,
 } from "@aws-sdk/client-ecs";
 import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
-import type { UrlStore, UrlEntry, ConfigStore } from "@arbor/db";
+import type { UrlStore, UrlEntry, ConfigStore, AuditStore, AuditRecord } from "@arbor/db";
 
 // ---------------------------------------------------------------------------
 // Mock @arbor/db before importing the handler
@@ -26,12 +26,21 @@ const mockConfigStore: ConfigStore = {
   set: vi.fn().mockResolvedValue(undefined),
 };
 
+const mockAuditStore: AuditStore = {
+  write: vi.fn().mockResolvedValue(undefined),
+  listRecent: vi.fn().mockResolvedValue([]),
+  listByThread: vi.fn().mockResolvedValue([]),
+};
+
 vi.mock("@arbor/db", () => ({
   PostgresUrlStore: vi.fn().mockImplementation(function () {
     return mockStore;
   }),
   PostgresConfigStore: vi.fn().mockImplementation(function () {
     return mockConfigStore;
+  }),
+  PostgresAuditStore: vi.fn().mockImplementation(function () {
+    return mockAuditStore;
   }),
 }));
 
@@ -92,6 +101,8 @@ beforeEach(() => {
   vi.mocked(mockStore.count).mockResolvedValue(0);
   vi.mocked(mockConfigStore.get).mockResolvedValue(undefined);
   vi.mocked(mockConfigStore.set).mockResolvedValue(undefined);
+  vi.mocked(mockAuditStore.listRecent).mockResolvedValue([]);
+  vi.mocked(mockAuditStore.listByThread).mockResolvedValue([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -407,5 +418,81 @@ describe("/slack/commands", () => {
     const res = await handler(makeCommandEvent("U_ADMIN", "help"), {} as any, {} as any);
     const payload = JSON.parse(res?.body ?? "");
     expect(payload.text).toContain("model");
+  });
+
+  it("audit — shows empty message when no records", async () => {
+    vi.mocked(mockAuditStore.listRecent).mockResolvedValueOnce([]);
+    const res = await handler(makeCommandEvent("U_ADMIN", "audit"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("No audit records");
+  });
+
+  it("audit — lists recent records with user, channel, and duration", async () => {
+    const record: AuditRecord = {
+      id: 1,
+      channel: "C_TEST",
+      thread_ts: "1.0",
+      user_id: "U_USER",
+      prompt: "What is the plan?",
+      response: "The plan is...",
+      model: "claude-opus-4-6",
+      duration_ms: 2500,
+      created_at: "2026-03-23T10:00:00.000Z",
+    };
+    vi.mocked(mockAuditStore.listRecent).mockResolvedValueOnce([record]);
+    const res = await handler(makeCommandEvent("U_ADMIN", "audit"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("U_USER");
+    expect(payload.text).toContain("C_TEST");
+    expect(payload.text).toContain("2500ms");
+    expect(mockAuditStore.listRecent).toHaveBeenCalledWith(10);
+  });
+
+  it("audit — respects custom limit, capped at 50", async () => {
+    await handler(makeCommandEvent("U_ADMIN", "audit 20"), {} as any, {} as any);
+    expect(mockAuditStore.listRecent).toHaveBeenCalledWith(20);
+
+    await handler(makeCommandEvent("U_ADMIN", "audit 100"), {} as any, {} as any);
+    expect(mockAuditStore.listRecent).toHaveBeenCalledWith(50);
+  });
+
+  it("audit-thread — rejects missing arguments", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "audit-thread C1"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("Usage:");
+  });
+
+  it("audit-thread — shows empty message when no records", async () => {
+    vi.mocked(mockAuditStore.listByThread).mockResolvedValueOnce([]);
+    const res = await handler(makeCommandEvent("U_ADMIN", "audit-thread C1 1.0"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("No audit records");
+  });
+
+  it("audit-thread — shows records for specified thread", async () => {
+    const record: AuditRecord = {
+      id: 2,
+      channel: "C1",
+      thread_ts: "1.0",
+      user_id: "U_USER",
+      prompt: "Summarize this",
+      response: "Summary: ...",
+      model: null,
+      duration_ms: 1200,
+      created_at: "2026-03-23T11:00:00.000Z",
+    };
+    vi.mocked(mockAuditStore.listByThread).mockResolvedValueOnce([record]);
+    const res = await handler(makeCommandEvent("U_ADMIN", "audit-thread C1 1.0"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("Summarize this");
+    expect(payload.text).toContain("Summary:");
+    expect(mockAuditStore.listByThread).toHaveBeenCalledWith("C1", "1.0");
+  });
+
+  it("help — mentions audit commands", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "help"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("audit");
+    expect(payload.text).toContain("audit-thread");
   });
 });
