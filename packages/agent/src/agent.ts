@@ -13,10 +13,10 @@ export async function runAgent(
     if (attempt > 0) {
       const base = Math.min(1000 * 2 ** (attempt - 1), 10_000);
       const delayMs = base * (1 + Math.random() * 0.1);
-      console.warn(
-        `[agent] attempt ${attempt}/${maxRetries + 1} failed (${lastError?.message}), retrying in ${Math.round(delayMs)}ms`
-      );
       await new Promise((resolve) => setTimeout(resolve, delayMs));
+      console.warn(
+        `[agent] attempt ${attempt}/${maxRetries + 1} failed (${lastError?.message}), retried after ${Math.round(delayMs)}ms`
+      );
     }
 
     try {
@@ -27,7 +27,7 @@ export async function runAgent(
     }
   }
 
-  throw lastError;
+  throw lastError ?? new Error("runAgent: no attempts made");
 }
 
 function isTransientError(err: Error): boolean {
@@ -37,7 +37,6 @@ function isTransientError(err: Error): boolean {
     msg.includes("timed out") ||
     msg.includes("econnreset") ||
     msg.includes("econnrefused") ||
-    msg.includes("connection") ||
     msg.includes("socket") ||
     msg.includes("network") ||
     msg.includes("overloaded") ||

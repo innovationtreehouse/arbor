@@ -148,6 +148,16 @@ describe("runAgent", () => {
     vi.useRealTimers();
   });
 
+  it("throws immediately with a clear message when MAX_MCP_RETRIES is negative", async () => {
+    process.env.MAX_MCP_RETRIES = "-1";
+    // query should never be called — the loop body never executes
+    const result = await expect(runAgent("prompt", "system")).rejects.toThrow(
+      "runAgent: no attempts made"
+    );
+    expect(vi.mocked(query)).not.toHaveBeenCalled();
+    delete process.env.MAX_MCP_RETRIES;
+  });
+
   it("respects MAX_MCP_RETRIES env var", async () => {
     process.env.MAX_MCP_RETRIES = "0";
     vi.useFakeTimers();
