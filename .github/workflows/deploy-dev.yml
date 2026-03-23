@@ -61,6 +61,18 @@ jobs:
           docker push $REGISTRY/arbor-agent:$SHA
           docker push $REGISTRY/arbor-agent:dev
 
+      - name: Verify image is pullable (dev)
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          aws ecr describe-images \
+            --repository-name arbor-agent \
+            --image-ids imageTag=$SHA \
+            --query 'imageDetails[0].imageTags' \
+            --output text
+          echo "Image $SHA confirmed in ECR."
+
       - name: Build Lambda zip
         run: |
           npm run build
@@ -112,6 +124,9 @@ jobs:
             --force-new-deployment
 
       - name: Wait for ECS service to stabilize (dev)
+        # If this step fails the service is degraded. Manual rollback:
+        #   aws ecs update-service --cluster arbor-dev --service arbor-agent-dev \
+        #     --task-definition arbor-agent-dev:<previous-revision>
         run: |
           aws ecs wait services-stable \
             --cluster arbor-dev \
