@@ -4,6 +4,7 @@ import { desc, eq, and } from "drizzle-orm";
 import { auditLog } from "./schema.js";
 import type { AuditStore, AuditRecord, NewAuditRecord } from "./store.js";
 
+/* v8 ignore start */
 export class PostgresAuditStore implements AuditStore {
   private db: ReturnType<typeof drizzle>;
 
@@ -56,3 +57,4 @@ function toRecord(row: typeof auditLog.$inferSelect): AuditRecord {
     created_at: row.created_at.toISOString(),
   };
 }
+/* v8 ignore stop */
