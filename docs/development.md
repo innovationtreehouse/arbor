@@ -33,15 +33,33 @@ Coverage is written to `coverage/` and uploaded as a workflow artifact on every 
 
 | Package | What is tested |
 |---|---|
-| `packages/lambda` | Signature verification, event routing, all admin subcommands |
-| `packages/agent` | Prompt building, Slack client helpers, agent runner, event processing |
+| `packages/lambda` | Signature verification, event routing, all admin subcommands including `audit` and `audit-thread` |
+| `packages/agent` | Prompt building, Slack client helpers, agent runner, event processing, MCP retry behaviour |
+| `packages/db` | SQLite store implementations (in-memory) and the `createStores` factory |
+| `packages/logger` | `createAuditLogger` error-swallowing wrapper |
 | `packages/mcp-url-fetcher` | URL config loading, `url_list` and `url_fetch` tool handlers |
 
 AWS SDK calls are mocked with `aws-sdk-client-mock`. Slack API calls and the Claude Agent SDK are mocked with `vi.mock()`. No network calls are made during tests.
 
 ---
 
-## Database Migrations
+## Database
+
+### Local development (SQLite)
+
+The `createStores` factory in `@arbor/db` selects the right store implementation based on the connection string. Any value that doesn't start with `postgres://` or `postgresql://` is treated as a SQLite file path:
+
+```bash
+# Use an in-memory database (no file, data lost on exit)
+DATABASE_URL=":memory:" node packages/agent/dist/index.js
+
+# Use a local file
+DATABASE_URL="./local.db" node packages/agent/dist/index.js
+```
+
+SQLite tables (`url_config`, `agent_config`, `audit_log`) are created automatically on first connection. No migration step needed for local dev.
+
+### Migrations (PostgreSQL)
 
 Schema changes are managed with [Drizzle Kit](https://orm.drizzle.team/kit-docs/overview) in `packages/db`.
 
@@ -75,8 +93,10 @@ The Claude automation workflow (`claude.yml`) is triggered by the CI workflow co
 
 ```
 packages/
-  db/               @arbor/db — Drizzle schema, UrlStore, ConfigStore
-  agent/            ECS container — SQS polling loop, Claude agent runner
+  db/               @arbor/db — Drizzle schema, UrlStore, ConfigStore, AuditStore,
+                                PostgreSQL and SQLite implementations, createStores factory
+  logger/           @arbor/logger — createAuditLogger (error-swallowing audit wrapper)
+  agent/            ECS container — SQS polling loop, Claude agent runner, audit logging
   lambda/           Lambda function — webhook receiver, admin commands
   mcp-url-fetcher/  Custom MCP server — URL allowlist fetcher
 docs/
