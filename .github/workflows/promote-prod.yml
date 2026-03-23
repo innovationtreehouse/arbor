@@ -17,6 +17,10 @@ permissions:
   pull-requests: none
   statuses: none
 
+concurrency:
+  group: promote-prod
+  cancel-in-progress: false  # queue rather than cancel — migrations must not interleave
+
 jobs:
   promote:
     name: promote ${{ inputs.sha }} to prod
@@ -124,6 +128,9 @@ jobs:
             --force-new-deployment
 
       - name: Wait for ECS service to stabilize (prod)
+        # If this step fails the service is degraded. Manual rollback:
+        #   aws ecs update-service --cluster arbor-prod --service arbor-agent-prod \
+        #     --task-definition arbor-agent-prod:<previous-revision>
         run: |
           aws ecs wait services-stable \
             --cluster arbor-prod \
