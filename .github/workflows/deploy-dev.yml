@@ -73,6 +73,15 @@ jobs:
             --output text
           echo "Image $SHA confirmed in ECR."
 
+      - name: Scan image for vulnerabilities (dev)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.ecr-login.outputs.registry }}/arbor-agent:${{ github.event.workflow_run.head_sha }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
       - name: Build Lambda zip
         run: |
           npm run build
@@ -84,8 +93,12 @@ jobs:
           SHA: ${{ github.event.workflow_run.head_sha }}
           BUCKET: ${{ secrets.LAMBDA_ARTIFACT_BUCKET }}
         run: |
+          sha256sum packages/lambda/lambda.zip | awk '{print $1}' \
+            > packages/lambda/lambda.zip.sha256
           aws s3 cp packages/lambda/lambda.zip \
             s3://$BUCKET/arbor-webhook/$SHA.zip
+          aws s3 cp packages/lambda/lambda.zip.sha256 \
+            s3://$BUCKET/arbor-webhook/$SHA.zip.sha256
 
       - name: Run database migrations (dev)
         # Migrations run before code deploy. If a subsequent step fails and you
@@ -109,6 +122,7 @@ jobs:
         run: aws lambda wait function-updated --function-name arbor-webhook-dev
 
       - name: Register ECS task definition (dev)
+        id: register-task-def-dev
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
           ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
@@ -122,13 +136,17 @@ jobs:
                    .compatibilities, .registeredAt, .registeredBy)
                | .containerDefinitions[0].image = $img' \
           > /tmp/task-def.json
-          aws ecs register-task-definition --cli-input-json file:///tmp/task-def.json
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "task_def_arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
 
       - name: Update ECS service (dev)
         run: |
           aws ecs update-service \
             --cluster arbor-dev \
             --service arbor-agent-dev \
+            --task-definition ${{ steps.register-task-def-dev.outputs.task_def_arn }} \
             --force-new-deployment
 
       - name: Wait for ECS service to stabilize (dev)
@@ -144,16 +162,28 @@ jobs:
         env:
           API_URL: ${{ secrets.API_URL_DEV }}
         run: |
-          # Intentionally sends a bad signature to verify the Lambda rejects
-          # unauthenticated requests — a 401 means the function is up and
-          # signature validation is working.
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API_URL/slack/events" \
+          # Test 1: bad signature → 401 with expected body
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_URL/slack/events" \
             -H "Content-Type: application/json" \
             -H "x-slack-request-timestamp: $(date +%s)" \
             -H "x-slack-signature: v0=badhash" \
             -d '{}')
+          STATUS=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -1)
           if [ "$STATUS" != "401" ]; then
-            echo "Smoke test failed: expected 401, got $STATUS"
+            echo "Smoke test 1 failed: expected 401, got $STATUS"
             exit 1
           fi
-          echo "Smoke test passed."
+          if ! echo "$BODY" | grep -q "Invalid signature"; then
+            echo "Smoke test 1 failed: unexpected body: $BODY"
+            exit 1
+          fi
+
+          # Test 2: unknown path → 404 (verifies routing is live)
+          STATUS2=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/healthz")
+          if [ "$STATUS2" != "404" ]; then
+            echo "Smoke test 2 failed: expected 404 on /healthz, got $STATUS2"
+            exit 1
+          fi
+
+          echo "Smoke tests passed."
