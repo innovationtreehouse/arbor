@@ -1,24 +1,32 @@
 # AWS Setup Procedure
 
-This document provisions all AWS infrastructure required to run Arbor. The setup is a single shell script you can copy and run after filling in the configuration block at the top.
+This document provisions all AWS infrastructure required to run Arbor. Setup is split into two parts:
+
+- **Part 1 — Shared resources** (run once per AWS account): OIDC provider, ECR repository, S3 artifact bucket.
+- **Part 2 — Per-environment resources** (run once with `ENV=dev`, then again with `ENV=prod`): VPC, database, secrets, SQS, IAM roles, ECS cluster/service, Lambda, API Gateway.
 
 ## Prerequisites
 
 - AWS CLI v2 configured with IAM credentials that have admin (or equivalently scoped) permissions
 - Docker installed locally
 - Arbor repository cloned and `npm install` run
+- Your GitHub repository name (e.g. `your-org/arbor`) — used to scope the OIDC trust policy
 
 ## How to use this document
 
-1. Copy the script below into a file (e.g. `setup.sh`)
-2. Fill in the values in the **Configuration** block at the top
-3. Run: `bash setup.sh`
+1. Copy each script below into a file (e.g. `setup-shared.sh`, `setup-env.sh`)
+2. Fill in the **Configuration** block at the top of each script
+3. Run shared setup once: `bash setup-shared.sh`
+4. Run environment setup for dev: `ENV=dev bash setup-env.sh`
+5. Run environment setup for prod: `ENV=prod bash setup-env.sh`
 
-The script is also safe to run section by section in a terminal — variable names are consistent throughout.
+Scripts are safe to run section by section in a terminal — variable names are consistent throughout.
 
 ---
 
-## Setup Script
+## Part 1: Shared Resources
+
+Run once per AWS account, before any environment setup.
 
 ```bash
 #!/usr/bin/env bash
@@ -29,6 +37,281 @@ set -euo pipefail
 # =============================================================================
 
 AWS_REGION="us-east-1"
+GITHUB_REPO="your-org/arbor"          # used to scope OIDC trust to this repo only
+ARTIFACT_BUCKET="arbor-lambda-artifacts"  # must be globally unique
+
+# =============================================================================
+# Derived
+# =============================================================================
+
+export AWS_REGION
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "Account: $AWS_ACCOUNT_ID  Region: $AWS_REGION"
+
+
+# =============================================================================
+# 1. GitHub Actions OIDC provider
+# =============================================================================
+# Allows GitHub Actions workflows to assume IAM roles via short-lived tokens
+# instead of long-lived access keys.
+
+echo "--- 1. OIDC provider ---"
+
+aws iam create-openid-connect-provider \
+  --url "https://token.actions.githubusercontent.com" \
+  --client-id-list "sts.amazonaws.com" \
+  --thumbprint-list "6938fd4d98bab03faadb97b34396831e3780aea1"
+
+echo "OIDC provider created."
+
+
+# =============================================================================
+# 2. ECR repository (shared between dev and prod)
+# =============================================================================
+# Both environments pull from the same repository; images are distinguished
+# by tag (git SHA, dev, prod).
+
+echo "--- 2. ECR ---"
+
+aws ecr create-repository \
+  --repository-name arbor-agent \
+  --image-scanning-configuration scanOnPush=true \
+  --image-tag-mutability MUTABLE
+
+echo "ECR repository created."
+
+
+# =============================================================================
+# 3. S3 artifact bucket for Lambda zips
+# =============================================================================
+# The CI pipeline uploads a Lambda zip keyed by git SHA on every dev deploy.
+# Promotion downloads the same zip to deploy to prod, guaranteeing the artifact
+# is identical between environments.
+
+echo "--- 3. S3 artifact bucket ---"
+
+if [ "$AWS_REGION" = "us-east-1" ]; then
+  aws s3api create-bucket --bucket "$ARTIFACT_BUCKET"
+else
+  aws s3api create-bucket --bucket "$ARTIFACT_BUCKET" \
+    --create-bucket-configuration LocationConstraint="$AWS_REGION"
+fi
+
+aws s3api put-bucket-versioning \
+  --bucket "$ARTIFACT_BUCKET" \
+  --versioning-configuration Status=Enabled
+
+aws s3api put-public-access-block \
+  --bucket "$ARTIFACT_BUCKET" \
+  --public-access-block-configuration \
+    BlockPublicAcls=true,IgnorePublicAcls=true,\
+BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+echo "Artifact bucket: $ARTIFACT_BUCKET"
+
+
+# =============================================================================
+# 4. GitHub Actions deploy roles (one per environment)
+# =============================================================================
+# Each role is assumed by GitHub Actions via OIDC. Permissions are scoped to
+# what the corresponding CI workflow actually needs.
+
+echo "--- 4. Deploy IAM roles ---"
+
+OIDC_PROVIDER="arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com"
+
+TRUST_POLICY=$(cat <<TRUST
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "Federated": "${OIDC_PROVIDER}" },
+    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Condition": {
+      "StringLike": {
+        "token.actions.githubusercontent.com:sub": "repo:${GITHUB_REPO}:*"
+      },
+      "StringEquals": {
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+      }
+    }
+  }]
+}
+TRUST
+)
+
+# Dev deploy role — used by deploy-dev.yml (triggered on every merge to main)
+aws iam create-role \
+  --role-name arbor-deploy-dev \
+  --assume-role-policy-document "$TRUST_POLICY"
+
+aws iam put-role-policy \
+  --role-name arbor-deploy-dev \
+  --policy-name arbor-deploy-dev-policy \
+  --policy-document "{
+    \"Version\": \"2012-10-17\",
+    \"Statement\": [
+      {
+        \"Sid\": \"ECR\",
+        \"Effect\": \"Allow\",
+        \"Action\": [
+          \"ecr:GetAuthorizationToken\",
+          \"ecr:BatchCheckLayerAvailability\",
+          \"ecr:InitiateLayerUpload\",
+          \"ecr:UploadLayerPart\",
+          \"ecr:CompleteLayerUpload\",
+          \"ecr:PutImage\",
+          \"ecr:DescribeImages\"
+        ],
+        \"Resource\": \"*\"
+      },
+      {
+        \"Sid\": \"S3Artifact\",
+        \"Effect\": \"Allow\",
+        \"Action\": \"s3:PutObject\",
+        \"Resource\": \"arn:aws:s3:::${ARTIFACT_BUCKET}/arbor-webhook/*\"
+      },
+      {
+        \"Sid\": \"SSMDigest\",
+        \"Effect\": \"Allow\",
+        \"Action\": \"ssm:PutParameter\",
+        \"Resource\": \"arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter/arbor/artifacts/*/sha256\"
+      },
+      {
+        \"Sid\": \"Lambda\",
+        \"Effect\": \"Allow\",
+        \"Action\": [
+          \"lambda:UpdateFunctionCode\",
+          \"lambda:GetFunctionConfiguration\"
+        ],
+        \"Resource\": \"arn:aws:lambda:${AWS_REGION}:${AWS_ACCOUNT_ID}:function:arbor-webhook-dev\"
+      },
+      {
+        \"Sid\": \"ECS\",
+        \"Effect\": \"Allow\",
+        \"Action\": [
+          \"ecs:DescribeTaskDefinition\",
+          \"ecs:RegisterTaskDefinition\",
+          \"ecs:UpdateService\",
+          \"ecs:DescribeServices\"
+        ],
+        \"Resource\": \"*\"
+      },
+      {
+        \"Sid\": \"PassRole\",
+        \"Effect\": \"Allow\",
+        \"Action\": \"iam:PassRole\",
+        \"Resource\": [
+          \"arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-execution-role-dev\",
+          \"arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-task-role-dev\"
+        ]
+      }
+    ]
+  }"
+
+# Prod deploy role — used by promote-prod.yml (manual workflow_dispatch)
+aws iam create-role \
+  --role-name arbor-deploy-prod \
+  --assume-role-policy-document "$TRUST_POLICY"
+
+aws iam put-role-policy \
+  --role-name arbor-deploy-prod \
+  --policy-name arbor-deploy-prod-policy \
+  --policy-document "{
+    \"Version\": \"2012-10-17\",
+    \"Statement\": [
+      {
+        \"Sid\": \"ECR\",
+        \"Effect\": \"Allow\",
+        \"Action\": [
+          \"ecr:GetAuthorizationToken\",
+          \"ecr:BatchGetImage\",
+          \"ecr:GetDownloadUrlForLayer\",
+          \"ecr:PutImage\",
+          \"ecr:DescribeImages\"
+        ],
+        \"Resource\": \"*\"
+      },
+      {
+        \"Sid\": \"S3Artifact\",
+        \"Effect\": \"Allow\",
+        \"Action\": \"s3:GetObject\",
+        \"Resource\": \"arn:aws:s3:::${ARTIFACT_BUCKET}/arbor-webhook/*\"
+      },
+      {
+        \"Sid\": \"SSMDigest\",
+        \"Effect\": \"Allow\",
+        \"Action\": \"ssm:GetParameter\",
+        \"Resource\": \"arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter/arbor/artifacts/*/sha256\"
+      },
+      {
+        \"Sid\": \"Lambda\",
+        \"Effect\": \"Allow\",
+        \"Action\": [
+          \"lambda:UpdateFunctionCode\",
+          \"lambda:GetFunctionConfiguration\"
+        ],
+        \"Resource\": \"arn:aws:lambda:${AWS_REGION}:${AWS_ACCOUNT_ID}:function:arbor-webhook-prod\"
+      },
+      {
+        \"Sid\": \"ECS\",
+        \"Effect\": \"Allow\",
+        \"Action\": [
+          \"ecs:DescribeTaskDefinition\",
+          \"ecs:RegisterTaskDefinition\",
+          \"ecs:UpdateService\",
+          \"ecs:DescribeServices\"
+        ],
+        \"Resource\": \"*\"
+      },
+      {
+        \"Sid\": \"PassRole\",
+        \"Effect\": \"Allow\",
+        \"Action\": \"iam:PassRole\",
+        \"Resource\": [
+          \"arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-execution-role-prod\",
+          \"arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-task-role-prod\"
+        ]
+      }
+    ]
+  }"
+
+echo "Deploy roles created."
+echo ""
+echo "============================================================"
+echo "Shared setup complete."
+echo ""
+echo "Record these values as GitHub Actions secrets:"
+echo "  AWS_ACCOUNT_ID        = $AWS_ACCOUNT_ID"
+echo "  AWS_REGION            = $AWS_REGION"
+echo "  LAMBDA_ARTIFACT_BUCKET = $ARTIFACT_BUCKET"
+echo "  AWS_ROLE_DEV          = arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-deploy-dev"
+echo "  AWS_ROLE_PROD         = arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-deploy-prod"
+echo "============================================================"
+```
+
+---
+
+## Part 2: Per-Environment Resources
+
+Run with `ENV=dev`, then again with `ENV=prod`. All resource names are suffixed with the environment name.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =============================================================================
+# Configuration — fill these in before running
+# Secrets differ between environments; fill in the correct values for each run.
+# =============================================================================
+
+: "${ENV:?ENV must be set to 'dev' or 'prod'}"
+if [[ "$ENV" != "dev" && "$ENV" != "prod" ]]; then
+  echo "ENV must be 'dev' or 'prod'"; exit 1
+fi
+
+AWS_REGION="us-east-1"
+ARTIFACT_BUCKET="arbor-lambda-artifacts"   # must match Part 1
 DB_PASSWORD="change-me-use-something-strong"
 SLACK_SIGNING_SECRET="your-slack-signing-secret"
 SLACK_BOT_TOKEN="xoxb-your-bot-token"
@@ -37,9 +320,8 @@ GOOGLE_CREDENTIALS_FILE="/path/to/service-account.json"
 GITHUB_TOKEN="ghp_your-token"
 ADMIN_USER_IDS="U12345678"   # comma-separated Slack user IDs for /squirrel-admin
 
-# Set USE_EXISTING_DB=true to skip RDS creation and use an existing PostgreSQL instance.
-# If true, you must also set EXISTING_DB_HOST, EXISTING_DB_NAME, EXISTING_DB_USER,
-# EXISTING_DB_PASSWORD.
+# Set USE_EXISTING_DB=true to skip RDS creation and use an existing PostgreSQL
+# instance. Required if your DB is not reachable from this machine (see §2).
 USE_EXISTING_DB="false"
 EXISTING_DB_HOST=""
 EXISTING_DB_NAME="arbor"
@@ -47,12 +329,13 @@ EXISTING_DB_USER="arbor"
 EXISTING_DB_PASSWORD=""
 
 # =============================================================================
-# Derived — do not edit
+# Derived
 # =============================================================================
 
 export AWS_REGION
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-echo "Account: $AWS_ACCOUNT_ID  Region: $AWS_REGION"
+E="$ENV"   # short alias used in resource names throughout
+echo "Account: $AWS_ACCOUNT_ID  Region: $AWS_REGION  Environment: $E"
 
 
 # =============================================================================
@@ -63,7 +346,7 @@ echo "--- 1. Networking ---"
 
 VPC_ID=$(aws ec2 create-vpc \
   --cidr-block 10.0.0.0/16 \
-  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=arbor}]' \
+  --tag-specifications "ResourceType=vpc,Tags=[{Key=Name,Value=arbor-${E}}]" \
   --query Vpc.VpcId --output text)
 
 aws ec2 modify-vpc-attribute --vpc-id "$VPC_ID" --enable-dns-hostnames
@@ -72,23 +355,23 @@ aws ec2 modify-vpc-attribute --vpc-id "$VPC_ID" --enable-dns-support
 PRIVATE_SUBNET_A=$(aws ec2 create-subnet \
   --vpc-id "$VPC_ID" --cidr-block 10.0.1.0/24 \
   --availability-zone "${AWS_REGION}a" \
-  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=arbor-private-a}]' \
+  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=arbor-${E}-private-a}]" \
   --query Subnet.SubnetId --output text)
 
 PRIVATE_SUBNET_B=$(aws ec2 create-subnet \
   --vpc-id "$VPC_ID" --cidr-block 10.0.2.0/24 \
   --availability-zone "${AWS_REGION}b" \
-  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=arbor-private-b}]' \
+  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=arbor-${E}-private-b}]" \
   --query Subnet.SubnetId --output text)
 
 PUBLIC_SUBNET=$(aws ec2 create-subnet \
   --vpc-id "$VPC_ID" --cidr-block 10.0.0.0/24 \
   --availability-zone "${AWS_REGION}a" \
-  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=arbor-public}]' \
+  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=arbor-${E}-public}]" \
   --query Subnet.SubnetId --output text)
 
 IGW_ID=$(aws ec2 create-internet-gateway \
-  --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=arbor-igw}]' \
+  --tag-specifications "ResourceType=internet-gateway,Tags=[{Key=Name,Value=arbor-${E}-igw}]" \
   --query InternetGateway.InternetGatewayId --output text)
 aws ec2 attach-internet-gateway --internet-gateway-id "$IGW_ID" --vpc-id "$VPC_ID"
 
@@ -97,7 +380,7 @@ EIP_ALLOC=$(aws ec2 allocate-address --domain vpc --query AllocationId --output 
 NAT_GW_ID=$(aws ec2 create-nat-gateway \
   --subnet-id "$PUBLIC_SUBNET" \
   --allocation-id "$EIP_ALLOC" \
-  --tag-specifications 'ResourceType=natgateway,Tags=[{Key=Name,Value=arbor-nat}]' \
+  --tag-specifications "ResourceType=natgateway,Tags=[{Key=Name,Value=arbor-${E}-nat}]" \
   --query NatGateway.NatGatewayId --output text)
 
 echo "Waiting for NAT gateway..."
@@ -117,21 +400,20 @@ aws ec2 associate-route-table --route-table-id "$PRIVATE_RT" --subnet-id "$PRIVA
 aws ec2 associate-route-table --route-table-id "$PRIVATE_RT" --subnet-id "$PRIVATE_SUBNET_B"
 
 RDS_SG=$(aws ec2 create-security-group \
-  --group-name arbor-rds --description "Arbor RDS" --vpc-id "$VPC_ID" \
+  --group-name "arbor-${E}-rds" --description "Arbor ${E} RDS" --vpc-id "$VPC_ID" \
   --query GroupId --output text)
 
 APP_SG=$(aws ec2 create-security-group \
-  --group-name arbor-app --description "Arbor Lambda and ECS" --vpc-id "$VPC_ID" \
+  --group-name "arbor-${E}-app" --description "Arbor ${E} Lambda and ECS" --vpc-id "$VPC_ID" \
   --query GroupId --output text)
 
 aws ec2 authorize-security-group-ingress \
   --group-id "$RDS_SG" --protocol tcp --port 5432 --source-group "$APP_SG"
 
 # VPC endpoints — keep AWS API traffic off the NAT gateway
-# A security group for the interface endpoints: accept HTTPS from Lambda/ECS
 ENDPOINT_SG=$(aws ec2 create-security-group \
-  --group-name arbor-endpoints \
-  --description "Arbor VPC interface endpoints" \
+  --group-name "arbor-${E}-endpoints" \
+  --description "Arbor ${E} VPC interface endpoints" \
   --vpc-id "$VPC_ID" \
   --query GroupId --output text)
 
@@ -145,49 +427,15 @@ aws ec2 create-vpc-endpoint \
   --vpc-endpoint-type Gateway \
   --route-table-ids "$PRIVATE_RT"
 
-# ECR — two endpoints are required together
-aws ec2 create-vpc-endpoint \
-  --vpc-id "$VPC_ID" \
-  --service-name "com.amazonaws.${AWS_REGION}.ecr.api" \
-  --vpc-endpoint-type Interface \
-  --subnet-ids "$PRIVATE_SUBNET_A" "$PRIVATE_SUBNET_B" \
-  --security-group-ids "$ENDPOINT_SG" \
-  --private-dns-enabled
-
-aws ec2 create-vpc-endpoint \
-  --vpc-id "$VPC_ID" \
-  --service-name "com.amazonaws.${AWS_REGION}.ecr.dkr" \
-  --vpc-endpoint-type Interface \
-  --subnet-ids "$PRIVATE_SUBNET_A" "$PRIVATE_SUBNET_B" \
-  --security-group-ids "$ENDPOINT_SG" \
-  --private-dns-enabled
-
-# SQS — Lambda sends to it; ECS polls it
-aws ec2 create-vpc-endpoint \
-  --vpc-id "$VPC_ID" \
-  --service-name "com.amazonaws.${AWS_REGION}.sqs" \
-  --vpc-endpoint-type Interface \
-  --subnet-ids "$PRIVATE_SUBNET_A" "$PRIVATE_SUBNET_B" \
-  --security-group-ids "$ENDPOINT_SG" \
-  --private-dns-enabled
-
-# Secrets Manager — Lambda and ECS execution role fetch secrets at startup
-aws ec2 create-vpc-endpoint \
-  --vpc-id "$VPC_ID" \
-  --service-name "com.amazonaws.${AWS_REGION}.secretsmanager" \
-  --vpc-endpoint-type Interface \
-  --subnet-ids "$PRIVATE_SUBNET_A" "$PRIVATE_SUBNET_B" \
-  --security-group-ids "$ENDPOINT_SG" \
-  --private-dns-enabled
-
-# CloudWatch Logs — ECS task log delivery
-aws ec2 create-vpc-endpoint \
-  --vpc-id "$VPC_ID" \
-  --service-name "com.amazonaws.${AWS_REGION}.logs" \
-  --vpc-endpoint-type Interface \
-  --subnet-ids "$PRIVATE_SUBNET_A" "$PRIVATE_SUBNET_B" \
-  --security-group-ids "$ENDPOINT_SG" \
-  --private-dns-enabled
+for SVC in ecr.api ecr.dkr sqs secretsmanager logs ssm; do
+  aws ec2 create-vpc-endpoint \
+    --vpc-id "$VPC_ID" \
+    --service-name "com.amazonaws.${AWS_REGION}.${SVC}" \
+    --vpc-endpoint-type Interface \
+    --subnet-ids "$PRIVATE_SUBNET_A" "$PRIVATE_SUBNET_B" \
+    --security-group-ids "$ENDPOINT_SG" \
+    --private-dns-enabled
+done
 
 echo "Networking done. VPC=$VPC_ID"
 
@@ -195,6 +443,17 @@ echo "Networking done. VPC=$VPC_ID"
 # =============================================================================
 # 2. Database (RDS PostgreSQL or existing)
 # =============================================================================
+# NOTE: RDS is provisioned in a private subnet. The CI pipeline runs migrations
+# from a GitHub Actions runner, which is not inside the VPC. If you create a
+# private RDS instance, migrations will fail unless you either:
+#   a) Use USE_EXISTING_DB=true with an externally reachable database (e.g.
+#      Neon, Railway, Supabase, or an RDS instance with a public endpoint), or
+#   b) Use a self-hosted GitHub Actions runner inside the VPC, or
+#   c) Run migrations manually from a bastion host before the first deploy.
+#
+# Recommendation for simplicity: use an external managed database with a public
+# connection string for DATABASE_URL_DEV / DATABASE_URL_PROD, and set
+# USE_EXISTING_DB=true.
 
 echo "--- 2. Database ---"
 
@@ -203,12 +462,12 @@ if [ "$USE_EXISTING_DB" = "true" ]; then
   echo "Using existing database. Host=${EXISTING_DB_HOST}"
 else
   aws rds create-db-subnet-group \
-    --db-subnet-group-name arbor-db-subnets \
-    --db-subnet-group-description "Arbor DB subnets" \
+    --db-subnet-group-name "arbor-${E}-db-subnets" \
+    --db-subnet-group-description "Arbor ${E} DB subnets" \
     --subnet-ids "$PRIVATE_SUBNET_A" "$PRIVATE_SUBNET_B"
 
   aws rds create-db-instance \
-    --db-instance-identifier arbor-db \
+    --db-instance-identifier "arbor-${E}" \
     --db-instance-class db.t4g.micro \
     --engine postgres \
     --engine-version 16 \
@@ -219,30 +478,26 @@ else
     --storage-type gp3 \
     --no-publicly-accessible \
     --vpc-security-group-ids "$RDS_SG" \
-    --db-subnet-group-name arbor-db-subnets \
+    --db-subnet-group-name "arbor-${E}-db-subnets" \
     --backup-retention-period 7 \
     --no-multi-az
 
   echo "Waiting for RDS instance (5-10 min)..."
-  aws rds wait db-instance-available --db-instance-identifier arbor-db
+  aws rds wait db-instance-available --db-instance-identifier "arbor-${E}"
 
   DB_HOST=$(aws rds describe-db-instances \
-    --db-instance-identifier arbor-db \
+    --db-instance-identifier "arbor-${E}" \
     --query 'DBInstances[0].Endpoint.Address' --output text)
 
   DATABASE_URL="postgres://arbor:${DB_PASSWORD}@${DB_HOST}/arbor"
   echo "Database ready. Host=$DB_HOST"
 fi
 
-# Run Drizzle migrations to create all tables (url_config, agent_config).
-# This requires DATABASE_URL to be reachable from this machine.
-# If the database is only accessible from within the VPC, run this from a
-# bastion host or via an SSM port-forwarding session:
+# Migrations must be run before the first deploy. If the database is reachable
+# from this machine, uncomment the next line:
+# (cd packages/db && DATABASE_URL="$DATABASE_URL" npm run db:migrate)
 #
-#   export DATABASE_URL="..."
-#   (cd packages/db && npm run db:migrate)
-#
-# Or apply the SQL manually:
+# Otherwise, apply manually. The current schema (packages/db/drizzle/):
 #
 #   CREATE TABLE IF NOT EXISTS url_config (
 #     url         TEXT PRIMARY KEY,
@@ -257,8 +512,17 @@ fi
 #     value TEXT NOT NULL
 #   );
 #
-# If the database is reachable from this machine, uncomment the next line:
-# (cd packages/db && DATABASE_URL="$DATABASE_URL" npm run db:migrate)
+#   CREATE TABLE IF NOT EXISTS audit_log (
+#     id          SERIAL PRIMARY KEY,
+#     channel     TEXT        NOT NULL,
+#     thread_ts   TEXT        NOT NULL,
+#     user_id     TEXT        NOT NULL,
+#     prompt      TEXT        NOT NULL,
+#     response    TEXT        NOT NULL,
+#     model       TEXT,
+#     duration_ms INTEGER     NOT NULL,
+#     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+#   );
 
 
 # =============================================================================
@@ -268,30 +532,30 @@ fi
 echo "--- 3. Secrets ---"
 
 aws secretsmanager create-secret \
-  --name arbor/database-url \
+  --name "arbor-${E}/database-url" \
   --secret-string "$DATABASE_URL"
 
 aws secretsmanager create-secret \
-  --name arbor/slack-signing-secret \
+  --name "arbor-${E}/slack-signing-secret" \
   --secret-string "$SLACK_SIGNING_SECRET"
 
 aws secretsmanager create-secret \
-  --name arbor/slack-bot-token \
+  --name "arbor-${E}/slack-bot-token" \
   --secret-string "$SLACK_BOT_TOKEN"
 
 aws secretsmanager create-secret \
-  --name arbor/anthropic-api-key \
+  --name "arbor-${E}/anthropic-api-key" \
   --secret-string "$ANTHROPIC_API_KEY"
 
 aws secretsmanager create-secret \
-  --name arbor/google-credentials \
+  --name "arbor-${E}/google-credentials" \
   --secret-string "$(cat "$GOOGLE_CREDENTIALS_FILE")"
 
 aws secretsmanager create-secret \
-  --name arbor/github-token \
+  --name "arbor-${E}/github-token" \
   --secret-string "$GITHUB_TOKEN"
 
-echo "Secrets stored."
+echo "Secrets stored under arbor-${E}/*"
 
 
 # =============================================================================
@@ -301,10 +565,10 @@ echo "Secrets stored."
 echo "--- 4. SQS ---"
 
 QUEUE_URL=$(aws sqs create-queue \
-  --queue-name arbor-events \
+  --queue-name "arbor-events-${E}" \
   --attributes '{
-    "VisibilityTimeout":          "300",
-    "MessageRetentionPeriod":     "86400",
+    "VisibilityTimeout":             "300",
+    "MessageRetentionPeriod":        "86400",
     "ReceiveMessageWaitTimeSeconds": "20"
   }' \
   --query QueueUrl --output text)
@@ -318,173 +582,219 @@ echo "Queue: $QUEUE_URL"
 
 
 # =============================================================================
-# 5. ECR and Docker image
+# 5. IAM roles (Lambda execution, ECS execution, ECS task)
 # =============================================================================
+# These are the runtime roles used by the deployed services. They are separate
+# from the deploy roles (arbor-deploy-dev / arbor-deploy-prod) created in
+# Part 1, which are only assumed by GitHub Actions.
 
-echo "--- 5. ECR ---"
-
-aws ecr create-repository --repository-name arbor-agent
-
-aws ecr get-login-password | docker login \
-  --username AWS \
-  --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-
-docker build -t arbor-agent -f packages/agent/Dockerfile .
-docker tag arbor-agent \
-  "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/arbor-agent:latest"
-docker push \
-  "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/arbor-agent:latest"
-
-echo "Image pushed."
-
-
-# =============================================================================
-# 6. IAM roles
-# =============================================================================
-
-echo "--- 6. IAM ---"
+echo "--- 5. IAM roles ---"
 
 # Lambda execution role
 aws iam create-role \
-  --role-name arbor-lambda-role \
+  --role-name "arbor-lambda-role-${E}" \
   --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
 
 aws iam attach-role-policy \
-  --role-name arbor-lambda-role \
+  --role-name "arbor-lambda-role-${E}" \
   --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
 
 aws iam put-role-policy \
-  --role-name arbor-lambda-role \
-  --policy-name arbor-lambda-policy \
+  --role-name "arbor-lambda-role-${E}" \
+  --policy-name "arbor-lambda-policy-${E}" \
   --policy-document "{
     \"Version\": \"2012-10-17\",
     \"Statement\": [
-      {\"Effect\":\"Allow\",\"Action\":[\"sqs:SendMessage\"],\"Resource\":\"$QUEUE_ARN\"},
+      {\"Effect\":\"Allow\",\"Action\":[\"sqs:SendMessage\"],\"Resource\":\"${QUEUE_ARN}\"},
       {\"Effect\":\"Allow\",\"Action\":[\"ecs:ListTasks\",\"ecs:RunTask\"],\"Resource\":\"*\"},
-      {\"Effect\":\"Allow\",\"Action\":\"iam:PassRole\",\"Resource\":\"arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-task-role\"},
-      {\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor/*\"}
+      {\"Effect\":\"Allow\",\"Action\":\"iam:PassRole\",\"Resource\":\"arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-task-role-${E}\"},
+      {\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor-${E}/*\"}
     ]
   }"
 
-# ECS task execution role (pulls image, injects secrets)
+# ECS task execution role (pulls image, injects secrets at container start)
 aws iam create-role \
-  --role-name arbor-ecs-execution-role \
+  --role-name "arbor-ecs-execution-role-${E}" \
   --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
 
 aws iam attach-role-policy \
-  --role-name arbor-ecs-execution-role \
+  --role-name "arbor-ecs-execution-role-${E}" \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
 aws iam put-role-policy \
-  --role-name arbor-ecs-execution-role \
-  --policy-name arbor-secrets-policy \
-  --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor/*\"}]}"
+  --role-name "arbor-ecs-execution-role-${E}" \
+  --policy-name "arbor-ecs-execution-secrets-${E}" \
+  --policy-document "{
+    \"Version\": \"2012-10-17\",
+    \"Statement\": [{
+      \"Effect\": \"Allow\",
+      \"Action\": \"secretsmanager:GetSecretValue\",
+      \"Resource\": \"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor-${E}/*\"
+    }]
+  }"
 
-# ECS task role (runtime SQS access)
+# ECS task role (runtime permissions for the running container)
 aws iam create-role \
-  --role-name arbor-ecs-task-role \
+  --role-name "arbor-ecs-task-role-${E}" \
   --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
 
 aws iam put-role-policy \
-  --role-name arbor-ecs-task-role \
-  --policy-name arbor-ecs-task-policy \
-  --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"sqs:ReceiveMessage\",\"sqs:DeleteMessage\",\"sqs:GetQueueAttributes\"],\"Resource\":\"$QUEUE_ARN\"}]}"
+  --role-name "arbor-ecs-task-role-${E}" \
+  --policy-name "arbor-ecs-task-policy-${E}" \
+  --policy-document "{
+    \"Version\": \"2012-10-17\",
+    \"Statement\": [{
+      \"Effect\": \"Allow\",
+      \"Action\": [\"sqs:ReceiveMessage\",\"sqs:DeleteMessage\",\"sqs:GetQueueAttributes\"],
+      \"Resource\": \"${QUEUE_ARN}\"
+    }]
+  }"
 
 echo "IAM roles created."
 
 
 # =============================================================================
-# 7. ECS cluster and task definition
+# 6. ECS cluster, task definition, and service
 # =============================================================================
 
-echo "--- 7. ECS ---"
+echo "--- 6. ECS ---"
 
-aws ecs create-cluster --cluster-name arbor --capacity-providers FARGATE
+aws ecs create-cluster \
+  --cluster-name "arbor-${E}" \
+  --capacity-providers FARGATE
 
-aws logs create-log-group --log-group-name /ecs/arbor-agent
+aws logs create-log-group --log-group-name "/ecs/arbor-agent-${E}"
 
-cat > /tmp/arbor-task-definition.json <<EOF
+# Build and push the initial image so the task definition has something to reference
+REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+aws ecr get-login-password | docker login \
+  --username AWS \
+  --password-stdin "$REGISTRY"
+
+docker build -t arbor-agent -f packages/agent/Dockerfile .
+docker tag  arbor-agent "${REGISTRY}/arbor-agent:latest"
+docker push "${REGISTRY}/arbor-agent:latest"
+
+cat > /tmp/arbor-task-def-${E}.json <<TASKDEF
 {
-  "family": "arbor-agent",
+  "family": "arbor-agent-${E}",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
   "memory": "1024",
-  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-execution-role",
-  "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-task-role",
+  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-execution-role-${E}",
+  "taskRoleArn":      "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-task-role-${E}",
   "containerDefinitions": [{
     "name": "arbor-agent",
-    "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/arbor-agent:latest",
+    "image": "${REGISTRY}/arbor-agent:latest",
     "essential": true,
     "logConfiguration": {
       "logDriver": "awslogs",
       "options": {
-        "awslogs-group": "/ecs/arbor-agent",
-        "awslogs-region": "${AWS_REGION}",
+        "awslogs-group":         "/ecs/arbor-agent-${E}",
+        "awslogs-region":        "${AWS_REGION}",
         "awslogs-stream-prefix": "ecs"
       }
     },
     "secrets": [
-      {"name":"DATABASE_URL",       "valueFrom":"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor/database-url"},
-      {"name":"SLACK_BOT_TOKEN",    "valueFrom":"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor/slack-bot-token"},
-      {"name":"ANTHROPIC_API_KEY",  "valueFrom":"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor/anthropic-api-key"},
-      {"name":"GOOGLE_CREDENTIALS", "valueFrom":"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor/google-credentials"},
-      {"name":"GITHUB_TOKEN",       "valueFrom":"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor/github-token"}
+      {"name":"DATABASE_URL",       "valueFrom":"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor-${E}/database-url"},
+      {"name":"SLACK_BOT_TOKEN",    "valueFrom":"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor-${E}/slack-bot-token"},
+      {"name":"ANTHROPIC_API_KEY",  "valueFrom":"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor-${E}/anthropic-api-key"},
+      {"name":"GOOGLE_CREDENTIALS", "valueFrom":"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor-${E}/google-credentials"},
+      {"name":"GITHUB_TOKEN",       "valueFrom":"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor-${E}/github-token"}
     ],
     "environment": [
-      {"name":"SQS_QUEUE_URL","value":"${QUEUE_URL}"},
-      {"name":"AWS_REGION",   "value":"${AWS_REGION}"}
+      {"name":"SQS_QUEUE_URL", "value":"${QUEUE_URL}"},
+      {"name":"AWS_REGION",    "value":"${AWS_REGION}"}
     ]
   }]
 }
-EOF
+TASKDEF
 
-aws ecs register-task-definition --cli-input-json file:///tmp/arbor-task-definition.json
-echo "ECS cluster and task definition registered."
+TASK_DEF_ARN=$(aws ecs register-task-definition \
+  --cli-input-json "file:///tmp/arbor-task-def-${E}.json" \
+  --query 'taskDefinition.taskDefinitionArn' --output text)
+
+# Create the ECS service. The deploy workflow calls update-service on subsequent
+# deploys; the service must exist before the first CI run.
+aws ecs create-service \
+  --cluster "arbor-${E}" \
+  --service-name "arbor-agent-${E}" \
+  --task-definition "$TASK_DEF_ARN" \
+  --desired-count 0 \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={
+    subnets=[${PRIVATE_SUBNET_A},${PRIVATE_SUBNET_B}],
+    securityGroups=[${APP_SG}],
+    assignPublicIp=DISABLED
+  }"
+
+echo "ECS cluster, task definition, and service created."
 
 
 # =============================================================================
-# 8. Lambda function and API Gateway
+# 7. Lambda function and API Gateway
 # =============================================================================
 
-echo "--- 8. Lambda ---"
+echo "--- 7. Lambda ---"
 
-(cd packages/lambda && npm run build && cd dist && zip -r ../lambda.zip .)
+npm run build
+test -d packages/lambda/dist || { echo "packages/lambda/dist not found"; exit 1; }
+(cd packages/lambda/dist && zip -r ../lambda.zip .)
+
+# Upload the initial zip to S3 (subsequent deploys upload by SHA)
+aws s3 cp packages/lambda/lambda.zip \
+  "s3://${ARTIFACT_BUCKET}/arbor-webhook/initial.zip"
 
 LAMBDA_ARN=$(aws lambda create-function \
-  --function-name arbor-webhook \
+  --function-name "arbor-webhook-${E}" \
   --runtime nodejs20.x \
-  --role "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-lambda-role" \
+  --role "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-lambda-role-${E}" \
   --handler index.handler \
-  --zip-file fileb://packages/lambda/lambda.zip \
+  --s3-bucket "$ARTIFACT_BUCKET" \
+  --s3-key "arbor-webhook/initial.zip" \
   --timeout 30 \
   --memory-size 256 \
   --vpc-config "SubnetIds=${PRIVATE_SUBNET_A},${PRIVATE_SUBNET_B},SecurityGroupIds=${APP_SG}" \
   --query FunctionArn --output text)
 
+aws lambda wait function-active --function-name "arbor-webhook-${E}"
+
+# Environment variables. DATABASE_URL and SLACK_SIGNING_SECRET are fetched from
+# Secrets Manager at configuration time and stored as Lambda env vars; they will
+# be visible in plaintext in the Lambda console. To avoid this, use the AWS
+# Parameters and Secrets Lambda extension instead (requires code changes).
+DB_URL=$(aws secretsmanager get-secret-value \
+  --secret-id "arbor-${E}/database-url" --query SecretString --output text)
+SIGNING_SECRET=$(aws secretsmanager get-secret-value \
+  --secret-id "arbor-${E}/slack-signing-secret" --query SecretString --output text)
+
 aws lambda update-function-configuration \
-  --function-name arbor-webhook \
+  --function-name "arbor-webhook-${E}" \
   --environment "Variables={
     SQS_QUEUE_URL=${QUEUE_URL},
-    ECS_CLUSTER=arbor,
-    ECS_TASK_FAMILY=arbor-agent,
-    ECS_TASK_DEFINITION=arbor-agent:1,
+    ECS_CLUSTER=arbor-${E},
+    ECS_TASK_FAMILY=arbor-agent-${E},
+    ECS_TASK_DEFINITION=arbor-agent-${E}:1,
     SUBNET_IDS=${PRIVATE_SUBNET_A},${PRIVATE_SUBNET_B},
     SECURITY_GROUP_IDS=${APP_SG},
     ADMIN_USER_IDS=${ADMIN_USER_IDS},
-    DATABASE_URL=$(aws secretsmanager get-secret-value --secret-id arbor/database-url --query SecretString --output text),
-    SLACK_SIGNING_SECRET=$(aws secretsmanager get-secret-value --secret-id arbor/slack-signing-secret --query SecretString --output text)
+    DATABASE_URL=${DB_URL},
+    SLACK_SIGNING_SECRET=${SIGNING_SECRET}
   }"
 
-echo "--- 8. API Gateway ---"
+aws lambda wait function-updated --function-name "arbor-webhook-${E}"
+
+echo "--- 7. API Gateway ---"
 
 API_ID=$(aws apigatewayv2 create-api \
-  --name arbor \
+  --name "arbor-${E}" \
   --protocol-type HTTP \
   --query ApiId --output text)
 
 aws lambda add-permission \
-  --function-name arbor-webhook \
+  --function-name "arbor-webhook-${E}" \
   --statement-id apigateway-invoke \
   --action lambda:InvokeFunction \
   --principal apigateway.amazonaws.com \
@@ -516,30 +826,52 @@ API_URL="https://${API_ID}.execute-api.${AWS_REGION}.amazonaws.com"
 
 echo ""
 echo "============================================================"
-echo "Setup complete."
+echo "${E} environment setup complete."
 echo "API Gateway URL: $API_URL"
+echo ""
+echo "Add these as GitHub Actions secrets (Settings → Secrets):"
+echo "  DATABASE_URL_${E^^}  = $DATABASE_URL"
+echo "  API_URL_${E^^}       = $API_URL"
 echo ""
 echo "Next steps:"
 echo "  1. Run database migrations (see §2 above) if not already done"
-echo "  2. Configure your Slack app — use the URL above:"
+echo "  2. Configure your Slack ${E} app (see Slack App Configuration below)"
 echo "       Events:   ${API_URL}/slack/events"
 echo "       Commands: ${API_URL}/slack/commands"
-echo "  3. Run the smoke test below to verify the deployment"
+echo "  3. Run the smoke test to verify"
 echo "============================================================"
 ```
 
 ---
 
+## GitHub Actions Secrets
+
+After running both setup scripts, add the following secrets to the repository under **Settings → Secrets and variables → Actions**:
+
+| Secret | Source | Used by |
+|---|---|---|
+| `AWS_REGION` | Your chosen region | Both workflows |
+| `AWS_ACCOUNT_ID` | Printed by Part 1 script | Both workflows |
+| `AWS_ROLE_DEV` | Printed by Part 1 script | `deploy-dev.yml` |
+| `AWS_ROLE_PROD` | Printed by Part 1 script | `promote-prod.yml` |
+| `LAMBDA_ARTIFACT_BUCKET` | Printed by Part 1 script | Both workflows |
+| `DATABASE_URL_DEV` | Printed by Part 2 `ENV=dev` | `deploy-dev.yml` migrations |
+| `DATABASE_URL_PROD` | Printed by Part 2 `ENV=prod` | `promote-prod.yml` migrations |
+| `API_URL_DEV` | Printed by Part 2 `ENV=dev` | `deploy-dev.yml` smoke test |
+| `API_URL_PROD` | Printed by Part 2 `ENV=prod` | `promote-prod.yml` smoke test |
+
+---
+
 ## Slack App Configuration
 
-These steps are done in the [Slack API console](https://api.slack.com/apps) — they cannot be scripted.
+These steps are done in the [Slack API console](https://api.slack.com/apps) and cannot be scripted. Create a separate Slack app for each environment to keep dev traffic out of production channels.
 
 1. **Event Subscriptions** → enable, set Request URL to `<API_URL>/slack/events`, subscribe to the `app_mention` bot event.
 2. **Slash Commands** → create `/squirrel-admin`, set Request URL to `<API_URL>/slack/commands`.
 3. **OAuth & Permissions** → add bot token scopes: `app_mentions:read`, `chat:write`, `conversations:history`, `conversations:replies`.
-4. Install the app to your workspace and copy the bot token into the `arbor/slack-bot-token` secret (update it if it changed since you ran the script).
-5. Copy the Signing Secret from **Basic Information** into `arbor/slack-signing-secret`.
-6. Invite `@Squirrel` to the channels where you want to use it.
+4. Install the app to your workspace and copy the bot token into the `arbor-<env>/slack-bot-token` secret. If you've already run the setup script, update the secret: `aws secretsmanager put-secret-value --secret-id arbor-<env>/slack-bot-token --secret-string "xoxb-..."`.
+5. Copy the Signing Secret from **Basic Information** into `arbor-<env>/slack-signing-secret`, and re-run the Lambda configuration update step to inject it as an env var.
+6. Invite the bot to the channels where you want to use it.
 
 ---
 
@@ -550,13 +882,18 @@ These steps are done in the [Slack API console](https://api.slack.com/apps) — 
 API_URL="https://<your-api-id>.execute-api.<region>.amazonaws.com"
 
 # Should return 401 — confirms Lambda is reachable and signature verification works
-curl -s -o /dev/null -w "%{http_code}" -X POST "${API_URL}/slack/events" \
+STATUS=$(curl -s -o /tmp/smoke -w "%{http_code}" -X POST "${API_URL}/slack/events" \
   -H "Content-Type: application/json" \
   -H "x-slack-request-timestamp: $(date +%s)" \
   -H "x-slack-signature: v0=badhash" \
-  -d '{}'
-# Expected output: 401
+  -d '{}')
+echo "Status: $STATUS  Body: $(cat /tmp/smoke)"
+# Expected: 401
+
+# Should return 404 — confirms routing is live
+curl -s -o /dev/null -w "%{http_code}" "${API_URL}/no-such-route-xyzzy"
+# Expected: 404
 
 # After mentioning @Squirrel in Slack, verify the ECS task started
-aws ecs list-tasks --cluster arbor --family arbor-agent --desired-status RUNNING
+aws ecs list-tasks --cluster "arbor-dev" --family "arbor-agent-dev" --desired-status RUNNING
 ```

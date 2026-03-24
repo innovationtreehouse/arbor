@@ -43,16 +43,21 @@ Promotion does not rebuild — it re-tags the existing SHA image and deploys it 
 
 ## Required GitHub Secrets
 
-Add these in **Settings → Secrets and variables → Actions**:
+Add these in **Settings → Secrets and variables → Actions**. See [aws-setup.md](aws-setup.md) for how to provision the underlying AWS resources and obtain these values.
 
 | Secret | Purpose |
 |---|---|
-| `AWS_ROLE_DEV` | IAM role ARN for dev deployments (OIDC) |
-| `AWS_ROLE_PROD` | IAM role ARN for prod deployments (OIDC) |
+| `AWS_ROLE_DEV` | IAM role ARN assumed by deploy-dev via OIDC |
+| `AWS_ROLE_PROD` | IAM role ARN assumed by promote-prod via OIDC |
 | `AWS_REGION` | e.g. `us-east-1` |
-| `AWS_ACCOUNT_ID` | AWS account ID (same for both if single-account) |
+| `AWS_ACCOUNT_ID` | AWS account ID |
+| `LAMBDA_ARTIFACT_BUCKET` | S3 bucket name for Lambda zips |
+| `DATABASE_URL_DEV` | Postgres connection string for dev migrations |
+| `DATABASE_URL_PROD` | Postgres connection string for prod migrations |
+| `API_URL_DEV` | API Gateway URL for dev smoke test |
+| `API_URL_PROD` | API Gateway URL for prod smoke test |
 
-Using OIDC (`aws-actions/configure-aws-credentials` with `role-to-assume`) is strongly preferred over long-lived access keys. The IAM roles need permissions to push to ECR, update Lambda, register ECS task definitions, and run `drizzle-kit migrate`.
+Workflows authenticate to AWS via OIDC (`aws-actions/configure-aws-credentials` with `role-to-assume`). No long-lived access keys are used.
 
 ---
 
@@ -89,106 +94,9 @@ merge to main
 7. Smoke test
 ```
 
-### Workflow File
+The full workflow is in [`.github/workflows/deploy-dev.yml`](../.github/workflows/deploy-dev.yml).
 
-```yaml
-name: Deploy to Dev
-
-on:
-  push:
-    branches: [main]
-
-permissions:
-  id-token: write
-  contents: read
-
-jobs:
-  deploy-dev:
-    name: Deploy to dev
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Configure AWS credentials (dev)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_DEV }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Log in to ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push Docker image
-        env:
-          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          SHA: ${{ github.sha }}
-        run: |
-          docker build -t $REGISTRY/arbor-agent:$SHA \
-                       -t $REGISTRY/arbor-agent:dev \
-                       -f packages/agent/Dockerfile .
-          docker push $REGISTRY/arbor-agent:$SHA
-          docker push $REGISTRY/arbor-agent:dev
-
-      - name: Build Lambda zip
-        run: |
-          npm run build
-          cd packages/lambda/dist && zip -r ../lambda.zip .
-
-      - name: Run database migrations (dev)
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_DEV }}
-        run: cd packages/db && npm run db:migrate
-
-      - name: Deploy Lambda (dev)
-        run: |
-          aws lambda update-function-code \
-            --function-name arbor-webhook-dev \
-            --zip-file fileb://packages/lambda/lambda.zip
-
-      - name: Register ECS task definition (dev)
-        env:
-          SHA: ${{ github.sha }}
-          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
-          REGION: ${{ secrets.AWS_REGION }}
-        run: |
-          # Read the current task definition, swap the image tag, and register it
-          aws ecs describe-task-definition \
-            --task-definition arbor-agent-dev \
-            --query taskDefinition \
-          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:$SHA" \
-              'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
-                   .compatibilities, .registeredAt, .registeredBy)
-               | .containerDefinitions[0].image = $img' \
-          > /tmp/task-def.json
-          aws ecs register-task-definition --cli-input-json file:///tmp/task-def.json
-
-      - name: Smoke test (dev)
-        env:
-          API_URL: ${{ secrets.API_URL_DEV }}
-        run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API_URL/slack/events" \
-            -H "Content-Type: application/json" \
-            -H "x-slack-request-timestamp: $(date +%s)" \
-            -H "x-slack-signature: v0=badhash" \
-            -d '{}')
-          if [ "$STATUS" != "401" ]; then
-            echo "Smoke test failed: expected 401, got $STATUS"
-            exit 1
-          fi
-          echo "Smoke test passed."
-```
-
-The smoke test sends an intentionally invalid Slack signature and asserts the Lambda returns 401. This confirms the function is deployed, reachable, and running signature verification — without requiring a real Slack event.
+The smoke test sends an intentionally invalid Slack signature and asserts the Lambda returns 401 with a non-empty body. This confirms the function is deployed, reachable, and running signature verification — without requiring a real Slack event.
 
 ---
 
@@ -225,125 +133,11 @@ specifies: sha=<git-sha>
 6. Smoke test (prod)
 ```
 
-### Workflow File
-
-```yaml
-name: Promote to Production
-
-on:
-  workflow_dispatch:
-    inputs:
-      sha:
-        description: "Git SHA to promote (must be deployed to dev)"
-        required: true
-
-permissions:
-  id-token: write
-  contents: read
-
-jobs:
-  promote:
-    name: Promote ${{ inputs.sha }} to prod
-    runs-on: ubuntu-latest
-    environment: production   # requires manual approval if configured in repo settings
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.sha }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Configure AWS credentials (prod)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_PROD }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Log in to ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Verify image exists and re-tag as prod
-        env:
-          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          SHA: ${{ inputs.sha }}
-        run: |
-          # Fail fast if the SHA was never pushed (e.g. dev deploy never ran)
-          docker pull $REGISTRY/arbor-agent:$SHA
-          docker tag  $REGISTRY/arbor-agent:$SHA $REGISTRY/arbor-agent:prod
-          docker push $REGISTRY/arbor-agent:prod
-
-      - name: Run database migrations (prod)
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_PROD }}
-        run: cd packages/db && npm run db:migrate
-
-      - name: Build Lambda zip
-        run: |
-          npm run build
-          cd packages/lambda/dist && zip -r ../lambda.zip .
-
-      - name: Deploy Lambda (prod)
-        run: |
-          aws lambda update-function-code \
-            --function-name arbor-webhook-prod \
-            --zip-file fileb://packages/lambda/lambda.zip
-
-      - name: Register ECS task definition (prod)
-        env:
-          SHA: ${{ inputs.sha }}
-          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
-          REGION: ${{ secrets.AWS_REGION }}
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition arbor-agent-prod \
-            --query taskDefinition \
-          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:$SHA" \
-              'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
-                   .compatibilities, .registeredAt, .registeredBy)
-               | .containerDefinitions[0].image = $img' \
-          > /tmp/task-def.json
-          aws ecs register-task-definition --cli-input-json file:///tmp/task-def.json
-
-      - name: Smoke test (prod)
-        env:
-          API_URL: ${{ secrets.API_URL_PROD }}
-        run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API_URL/slack/events" \
-            -H "Content-Type: application/json" \
-            -H "x-slack-request-timestamp: $(date +%s)" \
-            -H "x-slack-signature: v0=badhash" \
-            -d '{}')
-          if [ "$STATUS" != "401" ]; then
-            echo "Smoke test failed: expected 401, got $STATUS"
-            exit 1
-          fi
-          echo "Smoke test passed."
-```
+The full workflow is in [`.github/workflows/promote-prod.yml`](../.github/workflows/promote-prod.yml).
 
 ### Manual Approval Gate
 
 In **Settings → Environments**, create a `production` environment and add required reviewers. When the promote workflow runs, GitHub will pause after the job is queued and notify reviewers. The job only proceeds after an explicit approval. This prevents accidental or unauthorized promotions.
-
----
-
-## Additional Secrets Required
-
-Add these alongside the existing secrets:
-
-| Secret | Used by |
-|---|---|
-| `DATABASE_URL_DEV` | Deploy-dev migration step |
-| `DATABASE_URL_PROD` | Promote-prod migration step |
-| `API_URL_DEV` | Deploy-dev smoke test |
-| `API_URL_PROD` | Promote-prod smoke test |
 
 ---
 
