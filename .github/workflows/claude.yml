@@ -163,19 +163,36 @@ jobs:
         run: |
           echo "::warning::BOT_ACTOR repository variable is not set. The claude/pr-review status check will always report failure because review authorship cannot be verified. Configure BOT_ACTOR in Settings → Variables."
 
+      # When triggered via workflow_run (CI completes), skip if the PR already
+      # has the 'reviewed' label — prevents a re-review loop caused by CI
+      # running on the 'labeled' event fired when we apply 'reviewed' ourselves.
+      - name: Skip if already reviewed
+        id: skip-check
+        if: github.event_name == 'workflow_run'
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          REPO: ${{ github.repository }}
+        run: |
+          has_reviewed=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json labels \
+            --jq '[.labels[].name] | contains(["reviewed"]) | if . then "true" else "false" end')
+          echo "skip=$has_reviewed" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+        if: steps.skip-check.outputs.skip != 'true'
         with:
           fetch-depth: 0
 
       - name: Build prompt
         id: prompt
+        if: steps.skip-check.outputs.skip != 'true'
         run: node scripts/build-claude-prompt.js
         env:
           GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
 
       - name: Run Claude
         id: claude
-        if: steps.prompt.outputs.skip != 'true'
+        if: steps.skip-check.outputs.skip != 'true' && steps.prompt.outputs.skip != 'true'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
@@ -190,7 +207,7 @@ jobs:
             }
 
       - name: Report review status
-        if: always() && steps.prompt.outputs.skip != 'true'
+        if: always() && steps.skip-check.outputs.skip != 'true' && steps.prompt.outputs.skip != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
           OUTCOME: ${{ steps.claude.outcome }}
@@ -219,7 +236,7 @@ jobs:
             --silent
 
       - name: Apply reviewed label
-        if: steps.claude.conclusion == 'success' && steps.prompt.outputs.skip != 'true'
+        if: steps.claude.conclusion == 'success' && steps.skip-check.outputs.skip != 'true' && steps.prompt.outputs.skip != 'true'
         run: |
           gh label create reviewed --color "0075ca" --description "Reviewed by Claude" \
             --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
