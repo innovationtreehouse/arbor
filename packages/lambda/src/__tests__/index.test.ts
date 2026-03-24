@@ -44,6 +44,14 @@ vi.mock("@arbor/db", () => ({
   }),
 }));
 
+// Mock ChannelRateLimiter so tests control holdoff behaviour
+const mockRecordAndCheck = vi.fn().mockResolvedValue(false);
+vi.mock("../rate-limiter.js", () => ({
+  ChannelRateLimiter: vi.fn().mockImplementation(function () {
+    return { recordAndCheck: mockRecordAndCheck };
+  }),
+}));
+
 const { handler } = await import("../index.js");
 
 const sqsMock = mockClient(SQSClient);
@@ -99,10 +107,11 @@ beforeEach(() => {
   vi.mocked(mockStore.upsert).mockResolvedValue(undefined);
   vi.mocked(mockStore.delete).mockResolvedValue(undefined);
   vi.mocked(mockStore.count).mockResolvedValue(0);
-  vi.mocked(mockConfigStore.get).mockResolvedValue(undefined);
-  vi.mocked(mockConfigStore.set).mockResolvedValue(undefined);
-  vi.mocked(mockAuditStore.listRecent).mockResolvedValue([]);
-  vi.mocked(mockAuditStore.listByThread).mockResolvedValue([]);
+  vi.mocked(mockConfigStore.get).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockConfigStore.set).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockAuditStore.listRecent).mockReset().mockResolvedValue([]);
+  vi.mocked(mockAuditStore.listByThread).mockReset().mockResolvedValue([]);
+  mockRecordAndCheck.mockResolvedValue(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -494,5 +503,107 @@ describe("/slack/commands", () => {
     const payload = JSON.parse(res?.body ?? "");
     expect(payload.text).toContain("audit");
     expect(payload.text).toContain("audit-thread");
+  });
+
+  // ---------------------------------------------------------------------------
+  // token-limit subcommand
+  // ---------------------------------------------------------------------------
+
+  it("token-limit — shows 'unlimited' when no default is set", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValue(undefined);
+    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("unlimited");
+  });
+
+  it("token-limit — shows current default when set", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce("4096");
+    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("4096");
+  });
+
+  it("token-limit default <n> — sets the global default limit", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit default 4096"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("4096");
+    expect(vi.mocked(mockConfigStore.set)).toHaveBeenCalledWith("token_limit:default", "4096");
+  });
+
+  it("token-limit <channel> <n> — sets a per-channel limit", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit C_GENERAL 2048"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("2048");
+    expect(vi.mocked(mockConfigStore.set)).toHaveBeenCalledWith("token_limit:C_GENERAL", "2048");
+  });
+
+  it("token-limit <channel> — shows 'unlimited' when channel has no limit", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValue(undefined);
+    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit C_GENERAL"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("unlimited");
+  });
+
+  it("token-limit — rejects non-positive limit", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit default 0"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("positive integer");
+    expect(vi.mocked(mockConfigStore.set)).not.toHaveBeenCalled();
+  });
+
+  it("token-limit — rejects non-numeric limit", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit default banana"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("positive integer");
+  });
+
+  it("help — mentions token-limit command", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "help"), {} as any, {} as any);
+    const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("token-limit");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rate limiting — holdoff flag on SQS messages
+// ---------------------------------------------------------------------------
+
+describe("rate limiting", () => {
+  function mentionBody(channel = "C1") {
+    return JSON.stringify({
+      type: "event_callback",
+      event: { type: "app_mention", channel, ts: "1.0", thread_ts: "1.0", text: "@Squirrel hi", user: "U1" },
+    });
+  }
+
+  beforeEach(() => {
+    ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
+    sqsMock.on(SendMessageCommand).resolves({});
+  });
+
+  it("sets holdoff: false on SQS message when below threshold", async () => {
+    mockRecordAndCheck.mockResolvedValueOnce(false);
+    await handler(makeEvent({ body: mentionBody() }), {} as any, {} as any);
+    const sent = JSON.parse(sqsMock.calls()[0].args[0].input.MessageBody!);
+    expect(sent.holdoff).toBe(false);
+  });
+
+  it("sets holdoff: true on SQS message when rate limiter triggers", async () => {
+    mockRecordAndCheck.mockResolvedValueOnce(true);
+    await handler(makeEvent({ body: mentionBody() }), {} as any, {} as any);
+    const sent = JSON.parse(sqsMock.calls()[0].args[0].input.MessageBody!);
+    expect(sent.holdoff).toBe(true);
+  });
+
+  it("still enqueues to SQS even when in holdoff", async () => {
+    mockRecordAndCheck.mockResolvedValueOnce(true);
+    const res = await handler(makeEvent({ body: mentionBody() }), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    expect(sqsMock.calls()).toHaveLength(1);
+  });
+
+  it("calls recordAndCheck with the correct channel", async () => {
+    await handler(makeEvent({ body: mentionBody("C_SPECIAL") }), {} as any, {} as any);
+    expect(mockRecordAndCheck).toHaveBeenCalledWith("C_SPECIAL");
   });
 });

@@ -7,12 +7,14 @@ import {
 } from "@aws-sdk/client-ecs";
 import { PostgresUrlStore, PostgresConfigStore, PostgresAuditStore, type UrlStore, type ConfigStore, type AuditStore } from "@arbor/db";
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
+import { ChannelRateLimiter } from "./rate-limiter.js";
 
 const sqsClient = new SQSClient({});
 const ecsClient = new ECSClient({});
 const store: UrlStore = new PostgresUrlStore(process.env.DATABASE_URL!);
 const configStore: ConfigStore = new PostgresConfigStore(process.env.DATABASE_URL!);
 const auditStore: AuditStore = new PostgresAuditStore(process.env.DATABASE_URL!);
+const rateLimiter = new ChannelRateLimiter(configStore);
 const AGENT_NAME = process.env.AGENT_NAME ?? "Squirrel";
 
 // ---------------------------------------------------------------------------
@@ -96,15 +98,19 @@ async function handleEvent(rawBody: string) {
 
   await ensureAgentRunning();
 
+  const channel = body.event.channel as string;
+  const holdoff = await rateLimiter.recordAndCheck(channel);
+
   await sqsClient.send(
     new SendMessageCommand({
       QueueUrl: process.env.SQS_QUEUE_URL!,
       MessageBody: JSON.stringify({
-        channel: body.event.channel,
+        channel,
         thread_ts: body.event.thread_ts ?? body.event.ts,
         event_ts: body.event.ts,
         user: body.event.user,
         text: body.event.text,
+        holdoff,
       }),
     })
   );
@@ -174,6 +180,8 @@ async function handleCommand(rawBody: string) {
       return handleAudit(args);
     case "audit-thread":
       return handleAuditThread(args);
+    case "token-limit":
+      return handleTokenLimit(args);
     default:
       return ephemeral(
         `*${AGENT_NAME} Admin Commands:*\n` +
@@ -184,6 +192,7 @@ async function handleCommand(rawBody: string) {
           "• `/squirrel-admin model [<model-id>]` — show or set the active Claude model\n" +
           "• `/squirrel-admin audit [<limit>]` — show recent agent interactions\n" +
           "• `/squirrel-admin audit-thread <channel> <thread_ts>` — show interactions for a thread\n" +
+          "• `/squirrel-admin token-limit [<channel|default> [<limit>]]` — show or set per-channel token limit\n" +
           "• `/squirrel-admin help` — show this message"
       );
   }
@@ -322,6 +331,33 @@ async function handleAuditThread(args: string[]) {
   });
 
   return ephemeral(`*Thread interactions (${records.length}):*\n${lines.join("\n")}`);
+}
+
+async function handleTokenLimit(args: string[]) {
+  // token-limit                      → show default
+  // token-limit default              → show default
+  // token-limit default <n>          → set default
+  // token-limit <channel>            → show channel limit
+  // token-limit <channel> <n>        → set channel limit
+  const [target = "default", limitArg] = args;
+  const key = target === "default" ? "token_limit:default" : `token_limit:${target}`;
+
+  if (limitArg !== undefined) {
+    const n = parseInt(limitArg, 10);
+    if (isNaN(n) || n <= 0) {
+      return ephemeral("Token limit must be a positive integer.");
+    }
+    await configStore.set(key, String(n));
+    const label = target === "default" ? "default" : `<#${target}>`;
+    return ephemeral(`✅ Token limit for ${label} set to *${n}*.`);
+  }
+
+  const current = await configStore.get(key);
+  const label = target === "default" ? "default" : `<#${target}>`;
+  if (current === undefined) {
+    return ephemeral(`No token limit set for ${label} (unlimited).`);
+  }
+  return ephemeral(`Token limit for ${label}: *${current}* tokens per request.`);
 }
 
 function ephemeral(text: string) {

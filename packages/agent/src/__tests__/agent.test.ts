@@ -225,6 +225,32 @@ describe("runAgent", () => {
     vi.useRealTimers();
   });
 
+  it("passes maxTokens to query options when provided", async () => {
+    vi.mocked(query).mockReturnValue(
+      (async function* () {
+        yield { result: "ok" };
+      })()
+    );
+
+    await runAgent("prompt", "system", undefined, 2048);
+
+    const callArgs = vi.mocked(query).mock.calls[0][0];
+    expect(callArgs.options?.maxTokens).toBe(2048);
+  });
+
+  it("omits maxTokens from query options when not provided", async () => {
+    vi.mocked(query).mockReturnValue(
+      (async function* () {
+        yield { result: "ok" };
+      })()
+    );
+
+    await runAgent("prompt", "system");
+
+    const callArgs = vi.mocked(query).mock.calls[0][0];
+    expect(callArgs.options).not.toHaveProperty("maxTokens");
+  });
+
   it("passes DATABASE_URL to urlFetcher MCP env", async () => {
     process.env.DATABASE_URL = "postgres://localhost/test";
     vi.mocked(query).mockReturnValue(

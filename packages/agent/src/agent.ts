@@ -4,7 +4,8 @@ import * as path from "path";
 export async function runAgent(
   prompt: string,
   systemPrompt: string,
-  model?: string
+  model?: string,
+  maxTokens?: number,
 ): Promise<string> {
   const maxRetries = parseInt(process.env.MAX_MCP_RETRIES ?? "2", 10);
   let lastError: Error | undefined;
@@ -20,7 +21,7 @@ export async function runAgent(
     }
 
     try {
-      return await runAgentOnce(prompt, systemPrompt, model);
+      return await runAgentOnce(prompt, systemPrompt, model, maxTokens);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (!isTransientError(lastError)) throw lastError;
@@ -48,7 +49,8 @@ function isTransientError(err: Error): boolean {
 async function runAgentOnce(
   prompt: string,
   systemPrompt: string,
-  model?: string
+  model?: string,
+  maxTokens?: number,
 ): Promise<string> {
   const urlFetcherPath = path.resolve(
     __dirname,
@@ -62,6 +64,7 @@ async function runAgentOnce(
     options: {
       model: model ?? process.env.MODEL ?? "claude-opus-4-6",
       systemPrompt,
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
       mcpServers: {
         gdrive: {
           command: "npx",

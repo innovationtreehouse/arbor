@@ -8,13 +8,16 @@ import { createAuditLogger } from "@arbor/logger";
 import { fetchThreadHistory, postMessage, postEphemeral } from "./slack.js";
 import { runAgent } from "./agent.js";
 import { buildPrompt, buildSystemPrompt } from "./prompt.js";
+import { BatchBuffer } from "./batch-buffer.js";
 
-interface SlackEvent {
+export interface SlackEvent {
   channel: string;
   thread_ts: string;
   event_ts: string;
   user: string;
   text: string;
+  /** Set by the Lambda when the channel is in rate-limit holdoff. */
+  holdoff?: boolean;
 }
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -30,11 +33,17 @@ const SQS_WAIT_SECONDS = 20;
 export async function processEvent(event: SlackEvent): Promise<void> {
   await postEphemeral(event.channel, event.user, "_Searching…_");
   const model = await configStore.get("model").catch(() => undefined);
+  const rawLimit = await configStore
+    .get(`token_limit:${event.channel}`)
+    .catch(() => undefined)
+    ?? await configStore.get("token_limit:default").catch(() => undefined);
+  const parsedLimit = rawLimit !== undefined ? parseInt(rawLimit, 10) : undefined;
+  const maxTokens = parsedLimit !== undefined && parsedLimit > 0 ? parsedLimit : undefined;
   const history = await fetchThreadHistory(event.channel, event.thread_ts);
   const prompt = buildPrompt(history, event.text);
   const systemPrompt = buildSystemPrompt();
   const start = Date.now();
-  const response = await runAgent(prompt, systemPrompt, model);
+  const response = await runAgent(prompt, systemPrompt, model, maxTokens);
   const duration_ms = Date.now() - start;
   await postMessage(event.channel, event.thread_ts, response);
   await auditLogger.log({
@@ -53,6 +62,14 @@ async function main(): Promise<void> {
   console.log("Arbor agent started, polling SQS...");
   let idleMs = 0;
 
+  const batchBuffer = new BatchBuffer(60_000, async (events) => {
+    for (const event of events) {
+      await processEvent(event).catch((err) =>
+        console.error("Batch event failed:", err)
+      );
+    }
+  });
+
   while (true) {
     const result = await sqsClient.send(
       new ReceiveMessageCommand({
@@ -68,6 +85,7 @@ async function main(): Promise<void> {
         console.log(
           `Idle for ${IDLE_TIMEOUT_MS / 60_000}m with no messages — shutting down.`
         );
+        await batchBuffer.flushAll();
         process.exit(0);
       }
       continue;
@@ -78,7 +96,11 @@ async function main(): Promise<void> {
 
     try {
       const event: SlackEvent = JSON.parse(sqsMessage.Body!);
-      await processEvent(event);
+      if (event.holdoff) {
+        batchBuffer.add(event);
+      } else {
+        await processEvent(event);
+      }
     } catch (err) {
       console.error("Failed to process event:", err);
     }
