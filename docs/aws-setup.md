@@ -750,7 +750,7 @@ aws s3 cp packages/lambda/lambda.zip \
 
 LAMBDA_ARN=$(aws lambda create-function \
   --function-name "arbor-webhook-${E}" \
-  --runtime nodejs20.x \
+  --runtime nodejs22.x \
   --architectures arm64 \
   --role "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-lambda-role-${E}" \
   --handler index.handler \

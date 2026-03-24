@@ -1,4 +1,4 @@
-FROM --platform=linux/arm64 node:20-alpine AS builder
+FROM --platform=linux/arm64 node:22-alpine AS builder
 
 WORKDIR /build
 
@@ -31,7 +31,7 @@ RUN npm run -w @arbor/mcp-url-fetcher build
 RUN npm run -w @arbor/agent build
 
 # ---------------------------------------------------------------------------
-FROM --platform=linux/arm64 node:20-alpine AS runtime
+FROM --platform=linux/arm64 node:22-alpine AS runtime
 
 WORKDIR /app
 
