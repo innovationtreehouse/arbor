@@ -146,7 +146,8 @@ jobs:
           | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:$SHA" \
               'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                    .compatibilities, .registeredAt, .registeredBy)
-               | .containerDefinitions[0].image = $img' \
+               | .containerDefinitions[0].image = $img
+               | .runtimePlatform = {"cpuArchitecture": "ARM64", "operatingSystemFamily": "LINUX"}' \
           > /tmp/task-def.json
           TASK_DEF_ARN=$(aws ecs register-task-definition \
             --cli-input-json file:///tmp/task-def.json \

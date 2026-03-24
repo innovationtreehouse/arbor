@@ -683,6 +683,7 @@ cat > /tmp/arbor-task-def-${E}.json <<TASKDEF
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
   "memory": "1024",
+  "runtimePlatform": {"cpuArchitecture": "ARM64", "operatingSystemFamily": "LINUX"},
   "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-execution-role-${E}",
   "taskRoleArn":      "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-task-role-${E}",
   "containerDefinitions": [{
@@ -723,7 +724,7 @@ aws ecs create-service \
   --service-name "arbor-agent-${E}" \
   --task-definition "$TASK_DEF_ARN" \
   --desired-count 0 \
-  --launch-type FARGATE \
+  --capacity-provider-strategy capacityProvider=FARGATE_SPOT,weight=4 capacityProvider=FARGATE,weight=1 \
   --network-configuration "awsvpcConfiguration={
     subnets=[${PRIVATE_SUBNET_A},${PRIVATE_SUBNET_B}],
     securityGroups=[${APP_SG}],
@@ -750,6 +751,7 @@ aws s3 cp packages/lambda/lambda.zip \
 LAMBDA_ARN=$(aws lambda create-function \
   --function-name "arbor-webhook-${E}" \
   --runtime nodejs20.x \
+  --architectures arm64 \
   --role "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-lambda-role-${E}" \
   --handler index.handler \
   --s3-bucket "$ARTIFACT_BUCKET" \
