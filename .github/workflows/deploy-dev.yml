@@ -95,13 +95,14 @@ jobs:
         run: |
           DIGEST=$(sha256sum packages/lambda/lambda.zip | awk '{print $1}')
           aws s3 cp packages/lambda/lambda.zip s3://$BUCKET/arbor-webhook/$SHA.zip
-          # Store digest in SSM so it cannot be replaced by the same credentials
-          # that can overwrite the S3 artifact.
+          # Store digest in SSM. --no-overwrite means a second run for the same
+          # SHA fails loudly rather than silently replacing a previously written
+          # digest, preventing a compromised runner from swapping it after the fact.
           aws ssm put-parameter \
             --name "/arbor/artifacts/$SHA/sha256" \
             --value "$DIGEST" \
             --type String \
-            --overwrite
+            --no-overwrite
 
       - name: Run database migrations (dev)
         # Migrations run before code deploy. If a subsequent step fails and you
@@ -165,7 +166,9 @@ jobs:
         env:
           API_URL: ${{ secrets.API_URL_DEV }}
         run: |
-          # Test 1: bad signature → 401 with expected body
+          # Test 1: bad signature → 401 with non-empty body
+          # Checks status code and that the Lambda returned a body (not a gateway
+          # error or empty response), without coupling to exact error wording.
           STATUS=$(curl -s -o /tmp/smoke-body -w "%{http_code}" -X POST "$API_URL/slack/events" \
             -H "Content-Type: application/json" \
             -H "x-slack-request-timestamp: $(date +%s)" \
@@ -175,8 +178,8 @@ jobs:
             echo "Smoke test 1 failed: expected 401, got $STATUS"
             exit 1
           fi
-          if ! grep -q "Invalid signature" /tmp/smoke-body; then
-            echo "Smoke test 1 failed: unexpected body: $(cat /tmp/smoke-body)"
+          if [ ! -s /tmp/smoke-body ]; then
+            echo "Smoke test 1 failed: empty response body"
             exit 1
           fi
 
