@@ -94,7 +94,7 @@ jobs:
           docker push $REGISTRY/arbor-agent:prod
 
       - name: Scan image for vulnerabilities (prod)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
           image-ref: ${{ steps.ecr-login.outputs.registry }}/arbor-agent:${{ inputs.sha }}
           format: table
@@ -108,8 +108,10 @@ jobs:
           BUCKET: ${{ secrets.LAMBDA_ARTIFACT_BUCKET }}
         run: |
           aws s3 cp s3://$BUCKET/arbor-webhook/$SHA.zip packages/lambda/lambda.zip
-          aws s3 cp s3://$BUCKET/arbor-webhook/$SHA.zip.sha256 packages/lambda/lambda.zip.sha256
-          EXPECTED=$(cat packages/lambda/lambda.zip.sha256)
+          # Read digest from SSM (written by dev deploy, separate credential scope from S3)
+          EXPECTED=$(aws ssm get-parameter \
+            --name "/arbor/artifacts/$SHA/sha256" \
+            --query Parameter.Value --output text)
           ACTUAL=$(sha256sum packages/lambda/lambda.zip | awk '{print $1}')
           if [ "$EXPECTED" != "$ACTUAL" ]; then
             echo "Checksum mismatch — artifact may have been tampered with"
@@ -182,19 +184,17 @@ jobs:
           API_URL: ${{ secrets.API_URL_PROD }}
         run: |
           # Test 1: bad signature → 401 with expected body
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_URL/slack/events" \
+          STATUS=$(curl -s -o /tmp/smoke-body -w "%{http_code}" -X POST "$API_URL/slack/events" \
             -H "Content-Type: application/json" \
             -H "x-slack-request-timestamp: $(date +%s)" \
             -H "x-slack-signature: v0=badhash" \
             -d '{}')
-          STATUS=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | head -1)
           if [ "$STATUS" != "401" ]; then
             echo "Smoke test 1 failed: expected 401, got $STATUS"
             exit 1
           fi
-          if ! echo "$BODY" | grep -q "Invalid signature"; then
-            echo "Smoke test 1 failed: unexpected body: $BODY"
+          if ! grep -q "Invalid signature" /tmp/smoke-body; then
+            echo "Smoke test 1 failed: unexpected body: $(cat /tmp/smoke-body)"
             exit 1
           fi
 

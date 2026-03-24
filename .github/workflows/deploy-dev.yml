@@ -74,7 +74,7 @@ jobs:
           echo "Image $SHA confirmed in ECR."
 
       - name: Scan image for vulnerabilities (dev)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
           image-ref: ${{ steps.ecr-login.outputs.registry }}/arbor-agent:${{ github.event.workflow_run.head_sha }}
           format: table
@@ -93,12 +93,15 @@ jobs:
           SHA: ${{ github.event.workflow_run.head_sha }}
           BUCKET: ${{ secrets.LAMBDA_ARTIFACT_BUCKET }}
         run: |
-          sha256sum packages/lambda/lambda.zip | awk '{print $1}' \
-            > packages/lambda/lambda.zip.sha256
-          aws s3 cp packages/lambda/lambda.zip \
-            s3://$BUCKET/arbor-webhook/$SHA.zip
-          aws s3 cp packages/lambda/lambda.zip.sha256 \
-            s3://$BUCKET/arbor-webhook/$SHA.zip.sha256
+          DIGEST=$(sha256sum packages/lambda/lambda.zip | awk '{print $1}')
+          aws s3 cp packages/lambda/lambda.zip s3://$BUCKET/arbor-webhook/$SHA.zip
+          # Store digest in SSM so it cannot be replaced by the same credentials
+          # that can overwrite the S3 artifact.
+          aws ssm put-parameter \
+            --name "/arbor/artifacts/$SHA/sha256" \
+            --value "$DIGEST" \
+            --type String \
+            --overwrite
 
       - name: Run database migrations (dev)
         # Migrations run before code deploy. If a subsequent step fails and you
@@ -163,19 +166,17 @@ jobs:
           API_URL: ${{ secrets.API_URL_DEV }}
         run: |
           # Test 1: bad signature → 401 with expected body
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_URL/slack/events" \
+          STATUS=$(curl -s -o /tmp/smoke-body -w "%{http_code}" -X POST "$API_URL/slack/events" \
             -H "Content-Type: application/json" \
             -H "x-slack-request-timestamp: $(date +%s)" \
             -H "x-slack-signature: v0=badhash" \
             -d '{}')
-          STATUS=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | head -1)
           if [ "$STATUS" != "401" ]; then
             echo "Smoke test 1 failed: expected 401, got $STATUS"
             exit 1
           fi
-          if ! echo "$BODY" | grep -q "Invalid signature"; then
-            echo "Smoke test 1 failed: unexpected body: $BODY"
+          if ! grep -q "Invalid signature" /tmp/smoke-body; then
+            echo "Smoke test 1 failed: unexpected body: $(cat /tmp/smoke-body)"
             exit 1
           fi
 
