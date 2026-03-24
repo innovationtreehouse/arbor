@@ -724,7 +724,7 @@ aws ecs create-service \
   --service-name "arbor-agent-${E}" \
   --task-definition "$TASK_DEF_ARN" \
   --desired-count 0 \
-  --capacity-provider-strategy capacityProvider=FARGATE_SPOT,weight=4 capacityProvider=FARGATE,weight=1 \
+  --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={
     subnets=[${PRIVATE_SUBNET_A},${PRIVATE_SUBNET_B}],
     securityGroups=[${APP_SG}],
