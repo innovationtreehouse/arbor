@@ -8,17 +8,9 @@ import { createAuditLogger } from "@arbor/logger";
 import { fetchThreadHistory, postMessage, postEphemeral } from "./slack.js";
 import { runAgent } from "./agent.js";
 import { buildPrompt, buildSystemPrompt } from "./prompt.js";
-import { BatchBuffer } from "./batch-buffer.js";
+import { BatchBuffer, type BatchEvent } from "./batch-buffer.js";
 
-export interface SlackEvent {
-  channel: string;
-  thread_ts: string;
-  event_ts: string;
-  user: string;
-  text: string;
-  /** Set by the Lambda when the channel is in rate-limit holdoff. */
-  holdoff?: boolean;
-}
+export type SlackEvent = BatchEvent & { holdoff?: boolean };
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) throw new Error("DATABASE_URL is required");
@@ -32,13 +24,13 @@ const SQS_WAIT_SECONDS = 20;
 
 export async function processEvent(event: SlackEvent): Promise<void> {
   await postEphemeral(event.channel, event.user, "_Searching…_");
-  const model = await configStore.get("model").catch(() => undefined);
-  const rawLimit = await configStore
-    .get(`token_limit:${event.channel}`)
-    .catch(() => undefined)
-    ?? await configStore.get("token_limit:default").catch(() => undefined);
-  const parsedLimit = rawLimit !== undefined ? parseInt(rawLimit, 10) : undefined;
-  const maxTokens = parsedLimit !== undefined && parsedLimit > 0 ? parsedLimit : undefined;
+  const [model, channelLimit, defaultLimit] = await Promise.all([
+    configStore.get("model").catch(() => undefined),
+    configStore.get(`token_limit:${event.channel}`).catch(() => undefined),
+    configStore.get("token_limit:default").catch(() => undefined),
+  ]);
+  const rawLimit = channelLimit ?? defaultLimit;
+  const maxTokens = rawLimit !== undefined && parseInt(rawLimit, 10) > 0 ? parseInt(rawLimit, 10) : undefined;
   const history = await fetchThreadHistory(event.channel, event.thread_ts);
   const prompt = buildPrompt(history, event.text);
   const systemPrompt = buildSystemPrompt();

@@ -25,9 +25,12 @@ export class BatchBuffer {
 
   /** Append an event to the channel buffer, starting the flush timer if needed. */
   add(event: BatchEvent): void {
-    const buf = this.buffers.get(event.channel) ?? [];
+    let buf = this.buffers.get(event.channel);
+    if (!buf) {
+      buf = [];
+      this.buffers.set(event.channel, buf);
+    }
     buf.push(event);
-    this.buffers.set(event.channel, buf);
 
     if (!this.timers.has(event.channel)) {
       const timer = setTimeout(

@@ -342,18 +342,18 @@ async function handleTokenLimit(args: string[]) {
   const [target = "default", limitArg] = args;
   const key = target === "default" ? "token_limit:default" : `token_limit:${target}`;
 
+  const label = target === "default" ? "default" : `<#${target}>`;
+
   if (limitArg !== undefined) {
     const n = parseInt(limitArg, 10);
     if (isNaN(n) || n <= 0) {
       return ephemeral("Token limit must be a positive integer.");
     }
     await configStore.set(key, String(n));
-    const label = target === "default" ? "default" : `<#${target}>`;
     return ephemeral(`✅ Token limit for ${label} set to *${n}*.`);
   }
 
   const current = await configStore.get(key);
-  const label = target === "default" ? "default" : `<#${target}>`;
   if (current === undefined) {
     return ephemeral(`No token limit set for ${label} (unlimited).`);
   }
