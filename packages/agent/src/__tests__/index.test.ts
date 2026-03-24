@@ -95,7 +95,7 @@ describe("processEvent", () => {
     expect(fetchThreadHistory).toHaveBeenCalledWith("C_CHAN", "1.0");
     expect(buildPrompt).toHaveBeenCalledWith(history, baseEvent.text);
     expect(buildSystemPrompt).toHaveBeenCalled();
-    expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", undefined);
+    expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", undefined, undefined);
     expect(postMessage).toHaveBeenCalledWith("C_CHAN", "1.0", "Here is your answer.");
   });
 
@@ -105,7 +105,7 @@ describe("processEvent", () => {
     await processEvent(baseEvent);
 
     expect(mockConfigStore.get).toHaveBeenCalledWith("model");
-    expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", "claude-opus-4-6");
+    expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", "claude-opus-4-6", undefined);
   });
 
   it("passes the agent response to postMessage", async () => {
@@ -146,6 +146,104 @@ describe("processEvent", () => {
     await processEvent(baseEvent);
     expect(mockAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({ model: null })
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // Token limits
+  // ---------------------------------------------------------------------------
+
+  it("passes channel-specific token limit to runAgent", async () => {
+    vi.mocked(mockConfigStore.get).mockImplementation(async (key: string) => {
+      if (key === `token_limit:${baseEvent.channel}`) return "2048";
+      return undefined;
+    });
+
+    await processEvent(baseEvent);
+
+    expect(runAgent).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      2048,
+    );
+  });
+
+  it("falls back to token_limit:default when no channel limit is set", async () => {
+    vi.mocked(mockConfigStore.get).mockImplementation(async (key: string) => {
+      if (key === "token_limit:default") return "4096";
+      return undefined;
+    });
+
+    await processEvent(baseEvent);
+
+    expect(runAgent).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      4096,
+    );
+  });
+
+  it("channel-specific limit takes precedence over default", async () => {
+    vi.mocked(mockConfigStore.get).mockImplementation(async (key: string) => {
+      if (key === `token_limit:${baseEvent.channel}`) return "1024";
+      if (key === "token_limit:default") return "8192";
+      return undefined;
+    });
+
+    await processEvent(baseEvent);
+
+    expect(runAgent).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      1024,
+    );
+  });
+
+  it("passes undefined maxTokens when no limit is configured", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValue(undefined);
+
+    await processEvent(baseEvent);
+
+    expect(runAgent).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      undefined,
+    );
+  });
+
+  it("treats a stored limit of 0 as unconfigured (passes undefined)", async () => {
+    vi.mocked(mockConfigStore.get).mockImplementation(async (key: string) => {
+      if (key === `token_limit:${baseEvent.channel}`) return "0";
+      return undefined;
+    });
+
+    await processEvent(baseEvent);
+
+    expect(runAgent).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      undefined,
+    );
+  });
+
+  it("treats a stored negative limit as unconfigured (passes undefined)", async () => {
+    vi.mocked(mockConfigStore.get).mockImplementation(async (key: string) => {
+      if (key === `token_limit:${baseEvent.channel}`) return "-1";
+      return undefined;
+    });
+
+    await processEvent(baseEvent);
+
+    expect(runAgent).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      undefined,
     );
   });
 });
