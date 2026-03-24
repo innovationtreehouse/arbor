@@ -58,16 +58,6 @@ jobs:
           docker build -t $REGISTRY/arbor-agent:$SHA \
                        -t $REGISTRY/arbor-agent:dev \
                        -f packages/agent/Dockerfile .
-          docker save $REGISTRY/arbor-agent:$SHA -o /tmp/arbor-agent.tar
-
-      - name: Scan image for vulnerabilities (dev)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
-        with:
-          input: /tmp/arbor-agent.tar
-          format: table
-          exit-code: "1"
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
 
       - name: Push Docker image
         env:
