@@ -50,7 +50,7 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push Docker image
+      - name: Build Docker image
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           SHA: ${{ github.event.workflow_run.head_sha }}
@@ -58,12 +58,27 @@ jobs:
           docker build -t $REGISTRY/arbor-agent:$SHA \
                        -t $REGISTRY/arbor-agent:dev \
                        -f packages/agent/Dockerfile .
+          docker save $REGISTRY/arbor-agent:$SHA -o /tmp/arbor-agent.tar
+
+      - name: Scan image for vulnerabilities (dev)
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          input: /tmp/arbor-agent.tar
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Push Docker image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
           docker push $REGISTRY/arbor-agent:$SHA
           docker push $REGISTRY/arbor-agent:dev
 
       - name: Verify image is pullable (dev)
         env:
-          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           aws ecr describe-images \
@@ -72,15 +87,6 @@ jobs:
             --query 'imageDetails[0].imageTags' \
             --output text
           echo "Image $SHA confirmed in ECR."
-
-      - name: Scan image for vulnerabilities (dev)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
-        with:
-          image-ref: ${{ steps.ecr-login.outputs.registry }}/arbor-agent:${{ github.event.workflow_run.head_sha }}
-          format: table
-          exit-code: "1"
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
 
       - name: Build Lambda zip
         run: |
@@ -150,7 +156,7 @@ jobs:
           aws ecs update-service \
             --cluster arbor-dev \
             --service arbor-agent-dev \
-            --task-definition ${{ steps.register-task-def-dev.outputs.task_def_arn }} \
+            --task-definition "${{ steps.register-task-def-dev.outputs.task_def_arn }}" \
             --force-new-deployment
 
       - name: Wait for ECS service to stabilize (dev)
@@ -183,10 +189,10 @@ jobs:
             exit 1
           fi
 
-          # Test 2: unknown path → 404 (verifies routing is live)
-          STATUS2=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/healthz")
+          # Test 2: nonsense path → 404 (verifies routing is live)
+          STATUS2=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/no-such-route-xyzzy")
           if [ "$STATUS2" != "404" ]; then
-            echo "Smoke test 2 failed: expected 404 on /healthz, got $STATUS2"
+            echo "Smoke test 2 failed: expected 404 on /no-such-route-xyzzy, got $STATUS2"
             exit 1
           fi
 
