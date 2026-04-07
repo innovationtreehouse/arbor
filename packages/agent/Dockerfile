@@ -76,21 +76,3 @@ RUN npm install -g \
 ENV NODE_ENV=production
 
 CMD ["node", "/app/packages/agent/dist/index.js"]
-
-# ---------------------------------------------------------------------------
-# Migration runner — runs drizzle-kit migrate and exits
-# ---------------------------------------------------------------------------
-FROM --platform=linux/arm64 node:22-alpine AS migrate
-
-WORKDIR /app
-
-COPY --from=builder /build/packages/db/dist ./packages/db/dist
-COPY --from=builder /build/packages/db/package.json ./packages/db/
-COPY --from=builder /build/packages/db/src ./packages/db/src
-COPY packages/db/drizzle ./packages/db/drizzle
-COPY packages/db/drizzle.config.ts ./packages/db/
-COPY --from=builder /build/node_modules ./node_modules
-COPY package.json ./
-
-WORKDIR /app/packages/db
-CMD ["/app/node_modules/.bin/drizzle-kit", "migrate"]
