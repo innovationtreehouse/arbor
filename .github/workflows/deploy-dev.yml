@@ -50,24 +50,16 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build Docker image
+      - name: Build and push Docker image
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           docker buildx build --platform linux/arm64 \
-            --load \
+            --push \
             -t $REGISTRY/arbor-agent:$SHA \
             -t $REGISTRY/arbor-agent:dev \
             -f packages/agent/Dockerfile .
-
-      - name: Push Docker image
-        env:
-          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          docker push $REGISTRY/arbor-agent:$SHA
-          docker push $REGISTRY/arbor-agent:dev
 
       - name: Verify image is pullable (dev)
         env:
