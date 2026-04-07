@@ -1,5 +1,8 @@
 FROM --platform=linux/arm64 node:22-alpine AS builder
 
+# Required to compile native modules (e.g. better-sqlite3)
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /build
 
 # Copy workspace root
