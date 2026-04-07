@@ -77,6 +77,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
 async function handleEvent(rawBody: string) {
   const body = JSON.parse(rawBody);
+  console.log("event type:", body.type, "event subtype:", body.event?.type, "bot_id:", body.event?.bot_id);
 
   // URL verification handshake
   if (body.type === "url_verification") {
@@ -96,7 +97,10 @@ async function handleEvent(rawBody: string) {
     return { statusCode: 200, body: "" };
   }
 
-  await ensureAgentRunning();
+  await ensureAgentRunning().catch((err) => {
+    console.error("ensureAgentRunning failed:", err);
+    throw err;
+  });
 
   const channel = body.event.channel as string;
   const holdoff = await rateLimiter.recordAndCheck(channel);
@@ -138,7 +142,7 @@ async function ensureAgentRunning() {
         awsvpcConfiguration: {
           subnets: process.env.SUBNET_IDS!.split(","),
           securityGroups: process.env.SECURITY_GROUP_IDS!.split(","),
-          assignPublicIp: "DISABLED",
+          assignPublicIp: "ENABLED",
         },
       },
     })
