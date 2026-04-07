@@ -75,4 +75,4 @@ COPY --from=builder /build/node_modules ./node_modules
 COPY package.json ./
 
 WORKDIR /app/packages/db
-CMD ["node_modules/.bin/drizzle-kit", "migrate"]
+CMD ["/app/node_modules/.bin/drizzle-kit", "migrate"]
