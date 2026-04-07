@@ -773,17 +773,17 @@ SIGNING_SECRET=$(aws secretsmanager get-secret-value \
 
 aws lambda update-function-configuration \
   --function-name "arbor-webhook-${E}" \
-  --environment "Variables={
-    SQS_QUEUE_URL=${QUEUE_URL},
-    ECS_CLUSTER=arbor-${E},
-    ECS_TASK_FAMILY=arbor-agent-${E},
-    ECS_TASK_DEFINITION=arbor-agent-${E}:1,
-    SUBNET_IDS=${PRIVATE_SUBNET_A},${PRIVATE_SUBNET_B},
-    SECURITY_GROUP_IDS=${APP_SG},
-    ADMIN_USER_IDS=${ADMIN_USER_IDS},
-    DATABASE_URL=${DB_URL},
-    SLACK_SIGNING_SECRET=${SIGNING_SECRET}
-  }"
+  --environment "$(jq -n \
+    --arg sqs     "$QUEUE_URL" \
+    --arg cluster "arbor-${E}" \
+    --arg family  "arbor-agent-${E}" \
+    --arg taskdef "arbor-agent-${E}:1" \
+    --arg subnets "${PRIVATE_SUBNET_A},${PRIVATE_SUBNET_B}" \
+    --arg sgs     "$APP_SG" \
+    --arg admins  "$ADMIN_USER_IDS" \
+    --arg db      "$DB_URL" \
+    --arg slack   "$SIGNING_SECRET" \
+    '{Variables:{SQS_QUEUE_URL:$sqs,ECS_CLUSTER:$cluster,ECS_TASK_FAMILY:$family,ECS_TASK_DEFINITION:$taskdef,SUBNET_IDS:$subnets,SECURITY_GROUP_IDS:$sgs,ADMIN_USER_IDS:$admins,DATABASE_URL:$db,SLACK_SIGNING_SECRET:$slack}}')"
 
 aws lambda wait function-updated --function-name "arbor-webhook-${E}"
 
