@@ -83,8 +83,13 @@ jobs:
       - name: Build Lambda zip
         run: |
           npm run build
-          test -d packages/lambda/dist || { echo "packages/lambda/dist not found — build may have failed"; exit 1; }
-          cd packages/lambda/dist && zip -r ../lambda.zip .
+          test -f packages/lambda/dist/index.bundle.js || { echo "Lambda bundle not found — build may have failed"; exit 1; }
+          # esbuild produces a single self-contained bundle; zip just that file.
+          # The handler is index.handler — Lambda resolves index → index.bundle.js
+          # via the main field, but simpler to name it index.js in the zip.
+          mkdir -p packages/lambda/pkg
+          cp packages/lambda/dist/index.bundle.js packages/lambda/pkg/index.js
+          cd packages/lambda/pkg && zip -r ../lambda.zip .
 
       - name: Upload Lambda zip to S3
         env:
