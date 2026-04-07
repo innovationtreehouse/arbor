@@ -754,8 +754,7 @@ LAMBDA_ARN=$(aws lambda create-function \
   --architectures arm64 \
   --role "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-lambda-role-${E}" \
   --handler index.handler \
-  --s3-bucket "$ARTIFACT_BUCKET" \
-  --s3-key "arbor-webhook/initial.zip" \
+  --code "S3Bucket=${ARTIFACT_BUCKET},S3Key=arbor-webhook/initial.zip" \
   --timeout 30 \
   --memory-size 256 \
   --vpc-config "SubnetIds=${PRIVATE_SUBNET_A},${PRIVATE_SUBNET_B},SecurityGroupIds=${APP_SG}" \
