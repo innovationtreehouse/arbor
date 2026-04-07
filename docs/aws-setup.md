@@ -607,7 +607,7 @@ aws iam put-role-policy \
     \"Statement\": [
       {\"Effect\":\"Allow\",\"Action\":[\"sqs:SendMessage\"],\"Resource\":\"${QUEUE_ARN}\"},
       {\"Effect\":\"Allow\",\"Action\":[\"ecs:ListTasks\",\"ecs:RunTask\"],\"Resource\":\"*\"},
-      {\"Effect\":\"Allow\",\"Action\":\"iam:PassRole\",\"Resource\":\"arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-task-role-${E}\"},
+      {\"Effect\":\"Allow\",\"Action\":\"iam:PassRole\",\"Resource\":[\"arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-task-role-${E}\",\"arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-execution-role-${E}\"]},
       {\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:arbor-${E}/*\"}
     ]
   }"
