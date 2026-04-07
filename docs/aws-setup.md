@@ -717,6 +717,42 @@ TASK_DEF_ARN=$(aws ecs register-task-definition \
   --cli-input-json "file:///tmp/arbor-task-def-${E}.json" \
   --query 'taskDefinition.taskDefinitionArn' --output text)
 
+# Migration task definition — short-lived task that runs drizzle-kit migrate
+# and exits. The deploy workflow runs this before deploying code, keeping the
+# DB inside the VPC and avoiding the need for external DB access from CI.
+cat > /tmp/arbor-migrate-task-def-${E}.json <<MIGRATEDEF
+{
+  "family": "arbor-migrate-${E}",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "runtimePlatform": {"cpuArchitecture": "ARM64", "operatingSystemFamily": "LINUX"},
+  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-execution-role-${E}",
+  "taskRoleArn":      "arn:aws:iam::${AWS_ACCOUNT_ID}:role/arbor-ecs-task-role-${E}",
+  "containerDefinitions": [{
+    "name": "arbor-migrate",
+    "image": "${REGISTRY}/arbor-agent:latest",
+    "essential": true,
+    "entryPoint": ["drizzle-kit", "migrate"],
+    "workingDirectory": "/app/packages/db",
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group":         "/ecs/arbor-migrate-${E}",
+        "awslogs-region":        "${AWS_REGION}",
+        "awslogs-stream-prefix": "ecs"
+      }
+    }
+  }]
+}
+MIGRATEDEF
+
+aws logs create-log-group --log-group-name "/ecs/arbor-migrate-${E}"
+
+aws ecs register-task-definition \
+  --cli-input-json "file:///tmp/arbor-migrate-task-def-${E}.json"
+
 # Create the ECS service. The deploy workflow calls update-service on subsequent
 # deploys; the service must exist before the first CI run.
 aws ecs create-service \
@@ -831,11 +867,13 @@ echo "${E} environment setup complete."
 echo "API Gateway URL: $API_URL"
 echo ""
 echo "Add these as GitHub Actions secrets (Settings → Secrets):"
-echo "  DATABASE_URL_${E^^}  = $DATABASE_URL"
-echo "  API_URL_${E^^}       = $API_URL"
+echo "  DATABASE_URL_${E^^}       = $DATABASE_URL"
+echo "  API_URL_${E^^}            = $API_URL"
+echo "  SUBNET_IDS_${E^^}         = $PRIVATE_SUBNET_A,$PRIVATE_SUBNET_B"
+echo "  SECURITY_GROUP_ID_${E^^}  = $APP_SG"
 echo ""
 echo "Next steps:"
-echo "  1. Run database migrations (see §2 above) if not already done"
+echo "  1. Configure your Slack ${E} app (see Slack App Configuration below)"
 echo "  2. Configure your Slack ${E} app (see Slack App Configuration below)"
 echo "       Events:   ${API_URL}/slack/events"
 echo "       Commands: ${API_URL}/slack/commands"

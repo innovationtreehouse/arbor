@@ -108,12 +108,32 @@ jobs:
             --no-overwrite
 
       - name: Run database migrations (dev)
-        # Migrations run before code deploy. If a subsequent step fails and you
-        # need to roll back, Drizzle has no built-in down migrations — revert by
-        # applying a new migration that undoes the schema change.
+        # Runs drizzle-kit migrate in a short-lived ECS task inside the VPC,
+        # so the DB does not need to be reachable from GitHub Actions runners.
+        # Migrations run before code deploy — if a subsequent step fails and you
+        # need to roll back, apply a new migration that undoes the schema change.
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_DEV }}
-        run: cd packages/db && npm run db:migrate
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          TASK_ARN=$(aws ecs run-task \
+            --cluster arbor-dev \
+            --task-definition arbor-migrate-dev \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS_DEV }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID_DEV }}],assignPublicIp=DISABLED}" \
+            --overrides "{\"containerOverrides\":[{\"name\":\"arbor-migrate\",\"environment\":[{\"name\":\"DATABASE_URL\",\"value\":\"${{ secrets.DATABASE_URL_DEV }}\"}]}]}" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "Migration task: $TASK_ARN"
+          aws ecs wait tasks-stopped --cluster arbor-dev --tasks "$TASK_ARN"
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster arbor-dev --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration task failed with exit code $EXIT_CODE"
+            exit 1
+          fi
+          echo "Migrations complete."
 
       - name: Deploy Lambda (dev)
         env:
