@@ -92,7 +92,5 @@ COPY packages/db/drizzle.config.ts ./packages/db/
 COPY --from=builder /build/node_modules ./node_modules
 COPY package.json ./
 
-RUN npm install -g drizzle-kit
-
 WORKDIR /app/packages/db
-CMD ["drizzle-kit", "migrate"]
+CMD ["node_modules/.bin/drizzle-kit", "migrate"]
