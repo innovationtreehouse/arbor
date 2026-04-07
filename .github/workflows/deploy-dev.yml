@@ -84,7 +84,20 @@ jobs:
         run: |
           npm run build
           test -d packages/lambda/dist || { echo "packages/lambda/dist not found — build may have failed"; exit 1; }
-          cd packages/lambda/dist && zip -r ../lambda.zip .
+          # Bundle dist + workspace dependencies into a self-contained zip.
+          # Lambda can't resolve @arbor/* from the workspace root, so we copy
+          # the compiled workspace packages alongside the Lambda dist files.
+          rm -rf /tmp/lambda-pkg && mkdir /tmp/lambda-pkg
+          cp -r packages/lambda/dist/. /tmp/lambda-pkg/
+          mkdir -p /tmp/lambda-pkg/node_modules/@arbor
+          for pkg in db logger; do
+            cp -r packages/$pkg/dist /tmp/lambda-pkg/node_modules/@arbor/$pkg
+            cp packages/$pkg/package.json /tmp/lambda-pkg/node_modules/@arbor/$pkg/
+          done
+          # Include third-party deps (AWS SDK is provided by Lambda runtime)
+          cp -r node_modules /tmp/lambda-pkg/node_modules_root 2>/dev/null || true
+          rsync -a --exclude='@arbor' node_modules/ /tmp/lambda-pkg/node_modules/
+          cd /tmp/lambda-pkg && zip -r /home/runner/work/arbor/arbor/packages/lambda/lambda.zip .
 
       - name: Upload Lambda zip to S3
         env:
