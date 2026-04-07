@@ -458,7 +458,7 @@ echo "Networking done. VPC=$VPC_ID"
 echo "--- 2. Database ---"
 
 if [ "$USE_EXISTING_DB" = "true" ]; then
-  DATABASE_URL="postgres://${EXISTING_DB_USER}:${EXISTING_DB_PASSWORD}@${EXISTING_DB_HOST}/${EXISTING_DB_NAME}"
+  DATABASE_URL="postgres://${EXISTING_DB_USER}:${EXISTING_DB_PASSWORD}@${EXISTING_DB_HOST}/${EXISTING_DB_NAME}?sslmode=require"
   echo "Using existing database. Host=${EXISTING_DB_HOST}"
 else
   aws rds create-db-subnet-group \
@@ -489,7 +489,7 @@ else
     --db-instance-identifier "arbor-${E}" \
     --query 'DBInstances[0].Endpoint.Address' --output text)
 
-  DATABASE_URL="postgres://arbor:${DB_PASSWORD}@${DB_HOST}/arbor"
+  DATABASE_URL="postgres://arbor:${DB_PASSWORD}@${DB_HOST}/arbor?sslmode=require"
   echo "Database ready. Host=$DB_HOST"
 fi
 
