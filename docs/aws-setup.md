@@ -170,7 +170,7 @@ aws iam put-role-policy \
       {
         \"Sid\": \"S3Artifact\",
         \"Effect\": \"Allow\",
-        \"Action\": \"s3:PutObject\",
+        \"Action\": [\"s3:PutObject\", \"s3:GetObject\"],
         \"Resource\": \"arn:aws:s3:::${ARTIFACT_BUCKET}/arbor-webhook/*\"
       },
       {
