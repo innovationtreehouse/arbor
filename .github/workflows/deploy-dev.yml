@@ -155,6 +155,18 @@ jobs:
       - name: Wait for Lambda update (dev)
         run: aws lambda wait function-updated --function-name arbor-webhook-dev
 
+      - name: Set Lambda handler (dev)
+        run: |
+          CURRENT=$(aws lambda get-function-configuration \
+            --function-name arbor-webhook-dev \
+            --query 'Handler' --output text)
+          if [ "$CURRENT" != "index.handler" ]; then
+            aws lambda update-function-configuration \
+              --function-name arbor-webhook-dev \
+              --handler index.handler
+            aws lambda wait function-updated --function-name arbor-webhook-dev
+          fi
+
       - name: Register ECS task definition (dev)
         id: register-task-def-dev
         env:
