@@ -75,7 +75,33 @@ async function runAgentOnce(
     options: {
       model: model ?? process.env.MODEL ?? "claude-opus-4-6",
       systemPrompt,
-      permissionMode: "bypassPermissions",
+      allowedTools: [
+        // URL fetcher — read allowed URLs
+        "mcp__urlFetcher__url_fetch",
+        "mcp__urlFetcher__url_list",
+        // Google Drive — read only
+        "mcp__gdrive__listDocuments",
+        "mcp__gdrive__searchDocuments",
+        "mcp__gdrive__listDriveFiles",
+        "mcp__gdrive__searchDriveFiles",
+        "mcp__gdrive__getDocumentInfo",
+        "mcp__gdrive__listFolderContents",
+        "mcp__gdrive__getFolderInfo",
+        "mcp__gdrive__readDocument",
+        "mcp__gdrive__downloadFile",
+        // GitHub — read only
+        "mcp__github__search_repositories",
+        "mcp__github__search_code",
+        "mcp__github__search_issues",
+        "mcp__github__get_file_contents",
+        "mcp__github__list_commits",
+        "mcp__github__get_commit",
+        "mcp__github__get_issue",
+        "mcp__github__list_issues",
+        "mcp__github__get_pull_request",
+        "mcp__github__list_pull_requests",
+        "mcp__github__get_pull_request_files",
+      ],
       ...(maxTokens !== undefined ? { maxTokens } : {}),
       mcpServers: {
         ...(serviceAccountPath ? {
