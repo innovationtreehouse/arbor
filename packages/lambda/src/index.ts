@@ -49,7 +49,10 @@ function verifySlackSignature(
 // ---------------------------------------------------------------------------
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
-  const body = event.body ?? "";
+  const rawBody = event.body ?? "";
+  const body = event.isBase64Encoded
+    ? Buffer.from(rawBody, "base64").toString("utf8")
+    : rawBody;
   const timestamp = event.headers["x-slack-request-timestamp"] ?? "";
   const signature = event.headers["x-slack-signature"] ?? "";
 
