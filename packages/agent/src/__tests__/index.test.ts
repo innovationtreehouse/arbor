@@ -23,6 +23,13 @@ vi.mock("@arbor/db", () => ({
   PostgresAuditStore: vi.fn().mockImplementation(function () {
     return {};
   }),
+  PostgresUrlStore: vi.fn().mockImplementation(function () {
+    return {};
+  }),
+}));
+
+vi.mock("../admin.js", () => ({
+  processAdminCommand: vi.fn().mockResolvedValue(undefined),
 }));
 
 const mockAuditLog = vi.fn().mockResolvedValue(undefined);

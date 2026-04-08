@@ -7,7 +7,7 @@ import {
   RunTaskCommand,
 } from "@aws-sdk/client-ecs";
 import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
-import type { UrlStore, UrlEntry, ConfigStore, AuditStore, AuditRecord } from "@arbor/db";
+import type { UrlStore, ConfigStore, AuditStore } from "@arbor/db";
 
 // ---------------------------------------------------------------------------
 // Mock @arbor/db before importing the handler
@@ -240,10 +240,23 @@ describe("/slack/events", () => {
 // ---------------------------------------------------------------------------
 
 describe("/slack/commands", () => {
-  function makeCommandEvent(userId: string, text: string) {
-    const body = new URLSearchParams({ user_id: userId, command: "/squirrel-admin", text }).toString();
+  function makeCommandEvent(userId: string, text: string, responseUrl = "https://hooks.slack.com/response/test") {
+    const body = new URLSearchParams({ user_id: userId, command: "/squirrel-admin", text, response_url: responseUrl }).toString();
     return makeEvent({ path: "/slack/commands", body });
   }
+
+  function enqueuedCommand() {
+    const calls = sqsMock.calls().filter((c) => {
+      const body = c.args[0].input.MessageBody;
+      return body && JSON.parse(body).type === "admin_command";
+    });
+    return calls.length > 0 ? JSON.parse(calls[calls.length - 1].args[0].input.MessageBody!) : null;
+  }
+
+  beforeEach(() => {
+    ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:running"] });
+    sqsMock.on(SendMessageCommand).resolves({});
+  });
 
   it("rejects non-admin users", async () => {
     const res = await handler(makeCommandEvent("U_NOBODY", "list"), {} as any, {} as any);
@@ -252,315 +265,89 @@ describe("/slack/commands", () => {
     expect(payload.text).toContain("not authorized");
   });
 
-  it("shows help for unknown subcommand", async () => {
+  it("shows help inline for empty subcommand", async () => {
     const res = await handler(makeCommandEvent("U_ADMIN", ""), {} as any, {} as any);
     const payload = JSON.parse(res?.body ?? "");
     expect(payload.text).toContain("squirrel-admin list");
   });
 
-  it("list — returns empty message when no URLs configured", async () => {
-    vi.mocked(mockStore.listAll).mockResolvedValueOnce([]);
-    const res = await handler(makeCommandEvent("U_ADMIN", "list"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("No URLs configured");
-  });
-
-  it("list — shows configured URLs", async () => {
-    const item: UrlEntry = { url: "https://example.com", description: "Example", added_by: "U1", enabled: true, added_at: "" };
-    vi.mocked(mockStore.listAll).mockResolvedValueOnce([item]);
-    const res = await handler(makeCommandEvent("U_ADMIN", "list"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("https://example.com");
-    expect(payload.text).toContain("Example");
-  });
-
-  it("add — rejects missing description", async () => {
-    const res = await handler(makeCommandEvent("U_ADMIN", "add https://example.com"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("Usage:");
-  });
-
-  it("add — rejects non-https URL", async () => {
-    const res = await handler(makeCommandEvent("U_ADMIN", "add http://example.com My site"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("must start with");
-  });
-
-  it("add — rejects when URL limit reached", async () => {
-    process.env.MAX_URL_COUNT = "1";
-    vi.mocked(mockStore.count).mockResolvedValueOnce(1);
-    const res = await handler(makeCommandEvent("U_ADMIN", "add https://new.com New site"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("limit");
-    delete process.env.MAX_URL_COUNT;
-  });
-
-  it("add — stores a valid URL via the store", async () => {
-    vi.mocked(mockStore.count).mockResolvedValueOnce(0);
-
-    const res = await handler(
-      makeCommandEvent("U_ADMIN", "add https://docs.example.com Our API docs"),
-      {} as any,
-      {} as any
-    );
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("Added");
-    expect(payload.text).toContain("https://docs.example.com");
-
-    expect(vi.mocked(mockStore.upsert)).toHaveBeenCalledWith({
-      url: "https://docs.example.com",
-      description: "Our API docs",
-      added_by: "U_ADMIN",
-      enabled: true,
-    });
-  });
-
-  it("remove — deletes the URL via the store", async () => {
-    const res = await handler(
-      makeCommandEvent("U_ADMIN", "remove https://docs.example.com"),
-      {} as any,
-      {} as any
-    );
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("Removed");
-    expect(vi.mocked(mockStore.delete)).toHaveBeenCalledWith("https://docs.example.com");
-  });
-
-  it("remove — rejects missing URL argument", async () => {
-    const res = await handler(makeCommandEvent("U_ADMIN", "remove"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("Usage:");
-  });
-
-  it("test — rejects missing URL argument", async () => {
-    const res = await handler(makeCommandEvent("U_ADMIN", "test"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("Usage:");
-  });
-
-  it("test — rejects non-https URL", async () => {
-    const res = await handler(makeCommandEvent("U_ADMIN", "test http://bad.com"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("must start with");
-  });
-
-  it("test — returns preview on successful fetch", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        text: async () => "Hello world content",
-        headers: { get: () => "text/html" },
-      })
-    );
-
-    const res = await handler(
-      makeCommandEvent("U_ADMIN", "test https://example.com"),
-      {} as any,
-      {} as any
-    );
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("reachable");
-    expect(payload.text).toContain("Hello world content");
-    vi.unstubAllGlobals();
-  });
-
-  it("test — reports HTTP error status", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: "Not Found" })
-    );
-
-    const res = await handler(
-      makeCommandEvent("U_ADMIN", "test https://example.com"),
-      {} as any,
-      {} as any
-    );
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("404");
-    vi.unstubAllGlobals();
-  });
-
-  it("test — reports network error", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockRejectedValue(new Error("ECONNREFUSED"))
-    );
-
-    const res = await handler(
-      makeCommandEvent("U_ADMIN", "test https://example.com"),
-      {} as any,
-      {} as any
-    );
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("ECONNREFUSED");
-    vi.unstubAllGlobals();
-  });
-
-  it("model — shows current model when no argument given", async () => {
-    vi.mocked(mockConfigStore.get).mockResolvedValueOnce("claude-opus-4-6");
-    const res = await handler(makeCommandEvent("U_ADMIN", "model"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("claude-opus-4-6");
-  });
-
-  it("model — shows default when no model is set", async () => {
-    vi.mocked(mockConfigStore.get).mockResolvedValueOnce(undefined);
-    const res = await handler(makeCommandEvent("U_ADMIN", "model"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("default");
-  });
-
-  it("model — sets model when argument provided", async () => {
-    const res = await handler(
-      makeCommandEvent("U_ADMIN", "model claude-haiku-4-5-20251001"),
-      {} as any,
-      {} as any
-    );
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("claude-haiku-4-5-20251001");
-    expect(vi.mocked(mockConfigStore.set)).toHaveBeenCalledWith("model", "claude-haiku-4-5-20251001");
-  });
-
-  it("model — help text mentions model subcommand", async () => {
+  it("shows help inline for 'help' subcommand", async () => {
     const res = await handler(makeCommandEvent("U_ADMIN", "help"), {} as any, {} as any);
     const payload = JSON.parse(res?.body ?? "");
+    expect(payload.text).toContain("squirrel-admin list");
+    expect(payload.text).toContain("audit");
+    expect(payload.text).toContain("token-limit");
     expect(payload.text).toContain("model");
   });
 
-  it("audit — shows empty message when no records", async () => {
-    vi.mocked(mockAuditStore.listRecent).mockResolvedValueOnce([]);
-    const res = await handler(makeCommandEvent("U_ADMIN", "audit"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("No audit records");
+  it("acks immediately with 200 and enqueues list command to SQS", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "list"), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    expect(res?.body).toBe("");
+    const cmd = enqueuedCommand();
+    expect(cmd).toMatchObject({ type: "admin_command", subcommand: "list", args: [], userId: "U_ADMIN" });
   });
 
-  it("audit — lists recent records with user, channel, and duration", async () => {
-    const record: AuditRecord = {
-      id: 1,
-      channel: "C_TEST",
-      thread_ts: "1.0",
-      user_id: "U_USER",
-      prompt: "What is the plan?",
-      response: "The plan is...",
-      model: "claude-opus-4-6",
-      duration_ms: 2500,
-      created_at: "2026-03-23T10:00:00.000Z",
-    };
-    vi.mocked(mockAuditStore.listRecent).mockResolvedValueOnce([record]);
-    const res = await handler(makeCommandEvent("U_ADMIN", "audit"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("U_USER");
-    expect(payload.text).toContain("C_TEST");
-    expect(payload.text).toContain("2500ms");
-    expect(mockAuditStore.listRecent).toHaveBeenCalledWith(10);
+  it("acks immediately with 200 and enqueues add command to SQS", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "add https://docs.example.com Our API docs"), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    expect(res?.body).toBe("");
+    const cmd = enqueuedCommand();
+    expect(cmd).toMatchObject({ type: "admin_command", subcommand: "add", args: ["https://docs.example.com", "Our", "API", "docs"] });
   });
 
-  it("audit — respects custom limit, capped at 50", async () => {
-    await handler(makeCommandEvent("U_ADMIN", "audit 20"), {} as any, {} as any);
-    expect(mockAuditStore.listRecent).toHaveBeenCalledWith(20);
-
-    await handler(makeCommandEvent("U_ADMIN", "audit 100"), {} as any, {} as any);
-    expect(mockAuditStore.listRecent).toHaveBeenCalledWith(50);
+  it("acks immediately with 200 and enqueues remove command to SQS", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "remove https://docs.example.com"), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    const cmd = enqueuedCommand();
+    expect(cmd).toMatchObject({ type: "admin_command", subcommand: "remove", args: ["https://docs.example.com"] });
   });
 
-  it("audit-thread — rejects missing arguments", async () => {
-    const res = await handler(makeCommandEvent("U_ADMIN", "audit-thread C1"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("Usage:");
+  it("acks immediately with 200 and enqueues test command to SQS", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "test https://example.com"), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    const cmd = enqueuedCommand();
+    expect(cmd).toMatchObject({ type: "admin_command", subcommand: "test", args: ["https://example.com"] });
   });
 
-  it("audit-thread — shows empty message when no records", async () => {
-    vi.mocked(mockAuditStore.listByThread).mockResolvedValueOnce([]);
+  it("acks immediately with 200 and enqueues model command to SQS", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "model claude-haiku-4-5-20251001"), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    const cmd = enqueuedCommand();
+    expect(cmd).toMatchObject({ type: "admin_command", subcommand: "model", args: ["claude-haiku-4-5-20251001"] });
+  });
+
+  it("acks immediately with 200 and enqueues audit command to SQS", async () => {
+    const res = await handler(makeCommandEvent("U_ADMIN", "audit 20"), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    const cmd = enqueuedCommand();
+    expect(cmd).toMatchObject({ type: "admin_command", subcommand: "audit", args: ["20"] });
+  });
+
+  it("acks immediately with 200 and enqueues audit-thread command to SQS", async () => {
     const res = await handler(makeCommandEvent("U_ADMIN", "audit-thread C1 1.0"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("No audit records");
+    expect(res?.statusCode).toBe(200);
+    const cmd = enqueuedCommand();
+    expect(cmd).toMatchObject({ type: "admin_command", subcommand: "audit-thread", args: ["C1", "1.0"] });
   });
 
-  it("audit-thread — shows records for specified thread", async () => {
-    const record: AuditRecord = {
-      id: 2,
-      channel: "C1",
-      thread_ts: "1.0",
-      user_id: "U_USER",
-      prompt: "Summarize this",
-      response: "Summary: ...",
-      model: null,
-      duration_ms: 1200,
-      created_at: "2026-03-23T11:00:00.000Z",
-    };
-    vi.mocked(mockAuditStore.listByThread).mockResolvedValueOnce([record]);
-    const res = await handler(makeCommandEvent("U_ADMIN", "audit-thread C1 1.0"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("Summarize this");
-    expect(payload.text).toContain("Summary:");
-    expect(mockAuditStore.listByThread).toHaveBeenCalledWith("C1", "1.0");
-  });
-
-  it("help — mentions audit commands", async () => {
-    const res = await handler(makeCommandEvent("U_ADMIN", "help"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("audit");
-    expect(payload.text).toContain("audit-thread");
-  });
-
-  // ---------------------------------------------------------------------------
-  // token-limit subcommand
-  // ---------------------------------------------------------------------------
-
-  it("token-limit — shows 'unlimited' when no default is set", async () => {
-    vi.mocked(mockConfigStore.get).mockResolvedValue(undefined);
-    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("unlimited");
-  });
-
-  it("token-limit — shows current default when set", async () => {
-    vi.mocked(mockConfigStore.get).mockResolvedValueOnce("4096");
-    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("4096");
-  });
-
-  it("token-limit default <n> — sets the global default limit", async () => {
+  it("acks immediately with 200 and enqueues token-limit command to SQS", async () => {
     const res = await handler(makeCommandEvent("U_ADMIN", "token-limit default 4096"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("4096");
-    expect(vi.mocked(mockConfigStore.set)).toHaveBeenCalledWith("token_limit:default", "4096");
+    expect(res?.statusCode).toBe(200);
+    const cmd = enqueuedCommand();
+    expect(cmd).toMatchObject({ type: "admin_command", subcommand: "token-limit", args: ["default", "4096"] });
   });
 
-  it("token-limit <channel> <n> — sets a per-channel limit", async () => {
-    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit C_GENERAL 2048"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("2048");
-    expect(vi.mocked(mockConfigStore.set)).toHaveBeenCalledWith("token_limit:C_GENERAL", "2048");
+  it("includes response_url in the enqueued SQS message", async () => {
+    await handler(makeCommandEvent("U_ADMIN", "list", "https://hooks.slack.com/response/abc"), {} as any, {} as any);
+    const cmd = enqueuedCommand();
+    expect(cmd?.responseUrl).toBe("https://hooks.slack.com/response/abc");
   });
 
-  it("token-limit <channel> — shows 'unlimited' when channel has no limit", async () => {
-    vi.mocked(mockConfigStore.get).mockResolvedValue(undefined);
-    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit C_GENERAL"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("unlimited");
-  });
-
-  it("token-limit — rejects non-positive limit", async () => {
-    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit default 0"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("positive integer");
-    expect(vi.mocked(mockConfigStore.set)).not.toHaveBeenCalled();
-  });
-
-  it("token-limit — rejects non-numeric limit", async () => {
-    const res = await handler(makeCommandEvent("U_ADMIN", "token-limit default banana"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("positive integer");
-  });
-
-  it("help — mentions token-limit command", async () => {
-    const res = await handler(makeCommandEvent("U_ADMIN", "help"), {} as any, {} as any);
-    const payload = JSON.parse(res?.body ?? "");
-    expect(payload.text).toContain("token-limit");
+  it("starts the agent if not already running before enqueuing", async () => {
+    ecsMock.on(ListTasksCommand).resolves({ taskArns: [] });
+    await handler(makeCommandEvent("U_ADMIN", "list"), {} as any, {} as any);
+    expect(ecsMock.calls().some((c) => c.args[0].input instanceof Object && "taskDefinition" in c.args[0].input)).toBe(true);
   });
 });
 
