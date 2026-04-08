@@ -40,40 +40,50 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # If a newer commit on main has already passed CI, skip this deploy.
-          # Combined with cancel-in-progress: false, this means queued deploys
-          # will no-op and let the latest one do the real work.
+          # Combined with cancel-in-progress: false, queued deploys no-op and
+          # the latest one does the real work — covering all commits in the batch.
+          # We write SKIP_DEPLOY to $GITHUB_ENV rather than exit 0 so that all
+          # subsequent steps are skipped, leaving SSM unchanged. This ensures the
+          # next (real) deploy walks git log all the way back to the last recorded
+          # SHA and notifies every PR author in the batch.
           LATEST_SHA=$(gh api \
             "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?branch=main&status=success&per_page=1" \
             --jq '.workflow_runs[0].head_sha' 2>/dev/null || echo "")
           if [ -n "$LATEST_SHA" ] && [ "$LATEST_SHA" != "$SHA" ]; then
             echo "::notice::Skipping deploy of ${SHA:0:8} — newer SHA ${LATEST_SHA:0:8} has already passed CI."
-            exit 0
+            echo "SKIP_DEPLOY=true" >> "$GITHUB_ENV"
           fi
 
       - uses: actions/checkout@v4
+        if: env.SKIP_DEPLOY != 'true'
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0  # needed for git log to find merged PRs
 
       - uses: actions/setup-node@v4
+        if: env.SKIP_DEPLOY != 'true'
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
+        if: env.SKIP_DEPLOY != 'true'
         run: npm ci
 
       - name: Configure AWS credentials (dev)
+        if: env.SKIP_DEPLOY != 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_DEV }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Log in to ECR
+        if: env.SKIP_DEPLOY != 'true'
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push Docker image
+        if: env.SKIP_DEPLOY != 'true'
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           SHA: ${{ github.event.workflow_run.head_sha }}
@@ -85,6 +95,7 @@ jobs:
             -f packages/agent/Dockerfile .
 
       - name: Verify image is pullable (dev)
+        if: env.SKIP_DEPLOY != 'true'
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
@@ -96,6 +107,7 @@ jobs:
           echo "Image $SHA confirmed in ECR."
 
       - name: Build Lambda zip
+        if: env.SKIP_DEPLOY != 'true'
         run: |
           npm run build
           test -f packages/lambda/dist/index.bundle.js || { echo "Lambda bundle not found — build may have failed"; exit 1; }
@@ -106,6 +118,7 @@ jobs:
           cd packages/lambda/pkg && zip -r ../lambda.zip .
 
       - name: Upload Lambda zip to S3
+        if: env.SKIP_DEPLOY != 'true'
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
           BUCKET: ${{ secrets.LAMBDA_ARTIFACT_BUCKET }}
@@ -142,6 +155,7 @@ jobs:
         # so the DB does not need to be reachable from GitHub Actions runners.
         # Migrations run before code deploy — if a subsequent step fails and you
         # need to roll back, apply a new migration that undoes the schema change.
+        if: env.SKIP_DEPLOY != 'true'
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
           ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
@@ -166,6 +180,7 @@ jobs:
           echo "Migrations complete."
 
       - name: Deploy Lambda (dev)
+        if: env.SKIP_DEPLOY != 'true'
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
           BUCKET: ${{ secrets.LAMBDA_ARTIFACT_BUCKET }}
@@ -176,9 +191,11 @@ jobs:
             --s3-key arbor-webhook/$SHA.zip
 
       - name: Wait for Lambda update (dev)
+        if: env.SKIP_DEPLOY != 'true'
         run: aws lambda wait function-updated --function-name arbor-webhook-dev
 
       - name: Set Lambda handler (dev)
+        if: env.SKIP_DEPLOY != 'true'
         run: |
           CURRENT=$(aws lambda get-function-configuration \
             --function-name arbor-webhook-dev \
@@ -191,6 +208,7 @@ jobs:
           fi
 
       - name: Register ECS task definition (dev)
+        if: env.SKIP_DEPLOY != 'true'
         id: register-task-def-dev
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
@@ -212,6 +230,7 @@ jobs:
           echo "task_def_arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
 
       - name: Update ECS service (dev)
+        if: env.SKIP_DEPLOY != 'true'
         run: |
           aws ecs update-service \
             --cluster arbor-dev \
@@ -223,12 +242,14 @@ jobs:
         # If this step fails the service is degraded. Manual rollback:
         #   aws ecs update-service --cluster arbor-dev --service arbor-agent-dev \
         #     --task-definition arbor-agent-dev:<previous-revision>
+        if: env.SKIP_DEPLOY != 'true'
         run: |
           aws ecs wait services-stable \
             --cluster arbor-dev \
             --services arbor-agent-dev
 
       - name: Smoke test (dev)
+        if: env.SKIP_DEPLOY != 'true'
         env:
           API_URL: ${{ secrets.API_URL_DEV }}
         run: |
@@ -259,7 +280,7 @@ jobs:
           echo "Smoke tests passed."
 
       - name: Notify merged PRs and record deployed SHA
-        if: success()
+        if: success() && env.SKIP_DEPLOY != 'true'
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
           GH_TOKEN: ${{ github.token }}
@@ -270,7 +291,10 @@ jobs:
             --name "/arbor/deployed/dev/sha" \
             --query Parameter.Value --output text 2>/dev/null || echo "")
 
-          # Find PRs merged since last deploy and comment on them
+          # Find PRs merged since last deploy and comment on them.
+          # Because batched/skipped deploys leave SSM unchanged, PREV_SHA points
+          # to the last *real* deploy, so git log covers the full batch range and
+          # every author in the batch gets notified here.
           if [ -n "$PREV_SHA" ] && [ "$PREV_SHA" != "$SHA" ]; then
             # Get all commits between prev and current deploy
             COMMITS=$(git log --format="%H" "$PREV_SHA".."$SHA" 2>/dev/null || echo "")
