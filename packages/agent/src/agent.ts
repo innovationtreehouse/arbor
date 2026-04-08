@@ -75,6 +75,7 @@ async function runAgentOnce(
     options: {
       model: model ?? process.env.MODEL ?? "claude-opus-4-6",
       systemPrompt,
+      permissionMode: "bypassPermissions",
       ...(maxTokens !== undefined ? { maxTokens } : {}),
       mcpServers: {
         ...(serviceAccountPath ? {
