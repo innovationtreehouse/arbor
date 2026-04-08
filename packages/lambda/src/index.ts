@@ -5,15 +5,13 @@ import {
   ListTasksCommand,
   RunTaskCommand,
 } from "@aws-sdk/client-ecs";
-import { PostgresUrlStore, PostgresConfigStore, PostgresAuditStore, type UrlStore, type ConfigStore, type AuditStore } from "@arbor/db";
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
 import { ChannelRateLimiter } from "./rate-limiter.js";
+import { PostgresConfigStore } from "@arbor/db";
 
 const sqsClient = new SQSClient({});
 const ecsClient = new ECSClient({});
-const store: UrlStore = new PostgresUrlStore(process.env.DATABASE_URL!);
-const configStore: ConfigStore = new PostgresConfigStore(process.env.DATABASE_URL!);
-const auditStore: AuditStore = new PostgresAuditStore(process.env.DATABASE_URL!);
+const configStore = new PostgresConfigStore(process.env.DATABASE_URL!);
 const rateLimiter = new ChannelRateLimiter(configStore);
 const AGENT_NAME = process.env.AGENT_NAME ?? "Squirrel";
 
@@ -205,168 +203,6 @@ async function handleCommand(rawBody: string) {
   );
 
   return { statusCode: 200, body: "" };
-}
-
-async function handleList() {
-  const items = await store.listAll();
-
-  if (items.length === 0) {
-    return ephemeral(
-      "No URLs configured. Use `/squirrel-admin add <url> <description>` to add one."
-    );
-  }
-
-  const lines = items.map(
-    (item) =>
-      `• ${item.enabled ? "✅" : "❌"} *${item.url}*\n  ${item.description} _(added by <@${item.added_by}>)_`
-  );
-
-  return ephemeral("*Configured URLs:*\n" + lines.join("\n"));
-}
-
-async function handleAdd(args: string[], userId: string) {
-  if (args.length < 2) {
-    return ephemeral("Usage: `/squirrel-admin add <url> <description>`");
-  }
-
-  const url = args[0];
-  const description = args.slice(1).join(" ");
-
-  if (!url.startsWith("https://")) {
-    return ephemeral("URLs must start with `https://`.");
-  }
-
-  const maxUrls = parseInt(process.env.MAX_URL_COUNT ?? "100", 10);
-  const currentCount = await store.count();
-  if (currentCount >= maxUrls) {
-    return ephemeral(`Cannot add more URLs — limit of ${maxUrls} reached.`);
-  }
-
-  await store.upsert({ url, description, added_by: userId, enabled: true });
-
-  return ephemeral(`✅ Added: *${url}*\n${description}`);
-}
-
-async function handleRemove(args: string[]) {
-  if (args.length < 1) {
-    return ephemeral("Usage: `/squirrel-admin remove <url>`");
-  }
-
-  const url = args[0];
-  await store.delete(url);
-
-  return ephemeral(`✅ Removed: *${url}*`);
-}
-
-async function handleTest(args: string[]) {
-  if (args.length < 1) {
-    return ephemeral("Usage: `/squirrel-admin test <url>`");
-  }
-
-  const url = args[0];
-  if (!url.startsWith("https://")) {
-    return ephemeral("URLs must start with `https://`.");
-  }
-
-  try {
-    const response = await fetch(url, {
-      headers: { "User-Agent": "Squirrel-Bot/1.0" },
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (!response.ok) {
-      return ephemeral(
-        `❌ Fetch failed: HTTP ${response.status} ${response.statusText}`
-      );
-    }
-
-    const text = await response.text();
-    const preview = text.slice(0, 500).trim();
-    return ephemeral(
-      `✅ *${url}* is reachable (HTTP ${response.status})\n\n*Content preview:*\n\`\`\`\n${preview}\n\`\`\``
-    );
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return ephemeral(`❌ Fetch failed: ${msg}`);
-  }
-}
-
-async function handleModel(args: string[]) {
-  if (args.length === 0) {
-    const current = await configStore.get("model");
-    const display = current ?? `claude-sonnet-4-6 (default)`;
-    return ephemeral(`*Active model:* \`${display}\``);
-  }
-
-  const model = args[0];
-  await configStore.set("model", model);
-  return ephemeral(`✅ Model set to \`${model}\`. Takes effect on the next message.`);
-}
-
-async function handleAudit(args: string[]) {
-  const limit = Math.min(parseInt(args[0] ?? "10", 10) || 10, 50);
-  const records = await auditStore.listRecent(limit);
-
-  if (records.length === 0) {
-    return ephemeral("No audit records found.");
-  }
-
-  const lines = records.map((r) => {
-    const ts = new Date(r.created_at).toISOString().replace("T", " ").slice(0, 19);
-    const model = r.model ?? "default";
-    const summary = r.prompt.slice(0, 80).replace(/\n/g, " ");
-    return `• \`${ts}\` <@${r.user_id}> in <#${r.channel}> (${r.duration_ms}ms, ${model})\n  _${summary}${r.prompt.length > 80 ? "…" : ""}_`;
-  });
-
-  return ephemeral(`*Recent interactions (${records.length}):*\n${lines.join("\n")}`);
-}
-
-async function handleAuditThread(args: string[]) {
-  if (args.length < 2) {
-    return ephemeral("Usage: `/squirrel-admin audit-thread <channel> <thread_ts>`");
-  }
-
-  const [channel, thread_ts] = args;
-  const records = await auditStore.listByThread(channel, thread_ts);
-
-  if (records.length === 0) {
-    return ephemeral("No audit records found for that thread.");
-  }
-
-  const lines = records.map((r) => {
-    const ts = new Date(r.created_at).toISOString().replace("T", " ").slice(0, 19);
-    const model = r.model ?? "default";
-    return `• \`${ts}\` <@${r.user_id}> (${r.duration_ms}ms, ${model})\n  *Prompt:* ${r.prompt.slice(0, 120).replace(/\n/g, " ")}${r.prompt.length > 120 ? "…" : ""}\n  *Response:* ${r.response.slice(0, 120).replace(/\n/g, " ")}${r.response.length > 120 ? "…" : ""}`;
-  });
-
-  return ephemeral(`*Thread interactions (${records.length}):*\n${lines.join("\n")}`);
-}
-
-async function handleTokenLimit(args: string[]) {
-  // token-limit                      → show default
-  // token-limit default              → show default
-  // token-limit default <n>          → set default
-  // token-limit <channel>            → show channel limit
-  // token-limit <channel> <n>        → set channel limit
-  const [target = "default", limitArg] = args;
-  const key = target === "default" ? "token_limit:default" : `token_limit:${target}`;
-
-  const label = target === "default" ? "default" : `<#${target}>`;
-
-  if (limitArg !== undefined) {
-    const n = parseInt(limitArg, 10);
-    if (isNaN(n) || n <= 0) {
-      return ephemeral("Token limit must be a positive integer.");
-    }
-    await configStore.set(key, String(n));
-    return ephemeral(`✅ Token limit for ${label} set to *${n}*.`);
-  }
-
-  const current = await configStore.get(key);
-  if (current === undefined) {
-    return ephemeral(`No token limit set for ${label} (unlimited).`);
-  }
-  return ephemeral(`Token limit for ${label}: *${current}* tokens per request.`);
 }
 
 function ephemeral(text: string) {
