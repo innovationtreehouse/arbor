@@ -275,9 +275,10 @@ async function checkGoogleDrive(creds: {
 
     const { access_token } = await tokenRes.json() as { access_token: string };
 
-    // List up to 1 file to verify access
+    // List up to 1 file to verify access. includeItemsFromAllDrives and
+    // supportsAllDrives are required to see files in Shared Drives.
     const driveRes = await fetch(
-      "https://www.googleapis.com/drive/v3/files?pageSize=1&fields=files(id,name)",
+      "https://www.googleapis.com/drive/v3/files?pageSize=1&fields=files(id,name)&includeItemsFromAllDrives=true&supportsAllDrives=true",
       {
         headers: { Authorization: `Bearer ${access_token}` },
         signal: AbortSignal.timeout(8_000),
@@ -291,7 +292,7 @@ async function checkGoogleDrive(creds: {
     const { files } = await driveRes.json() as { files: { id: string; name: string }[] };
     const fileCount = files.length;
     const note = fileCount === 0
-      ? " (no files visible — share content with the service account)"
+      ? " (no files visible — share files or folders directly with the service account email)"
       : ` (${fileCount} file${fileCount === 1 ? "" : "s"} visible)`;
     return `✅ *Google Drive*: authenticated as \`${creds.client_email}\`${note}`;
   } catch (err) {
