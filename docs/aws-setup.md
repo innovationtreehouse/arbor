@@ -157,6 +157,8 @@ aws iam put-role-policy \
         \"Action\": [
           \"ecr:GetAuthorizationToken\",
           \"ecr:BatchCheckLayerAvailability\",
+          \"ecr:BatchGetImage\",
+          \"ecr:GetDownloadUrlForLayer\",
           \"ecr:InitiateLayerUpload\",
           \"ecr:UploadLayerPart\",
           \"ecr:CompleteLayerUpload\",
