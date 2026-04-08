@@ -1,5 +1,7 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import * as path from "path";
+import * as fs from "fs";
+import * as os from "os";
 
 export async function runAgent(
   prompt: string,
@@ -57,8 +59,17 @@ async function runAgentOnce(
     "../../mcp-url-fetcher/dist/index.js"
   );
 
+  // Write service account credentials to a temp file for the GDrive MCP server
+  const credentialsJson = process.env.GOOGLE_CREDENTIALS;
+  let serviceAccountPath: string | undefined;
+  if (credentialsJson) {
+    serviceAccountPath = path.join(os.tmpdir(), `sa-credentials-${process.pid}.json`);
+    fs.writeFileSync(serviceAccountPath, credentialsJson, { mode: 0o600 });
+  }
+
   let result = "";
 
+  try {
   for await (const message of query({
     prompt,
     options: {
@@ -66,13 +77,16 @@ async function runAgentOnce(
       systemPrompt,
       ...(maxTokens !== undefined ? { maxTokens } : {}),
       mcpServers: {
+        ...(serviceAccountPath ? {
         gdrive: {
-          command: "npx",
-          args: ["-y", "@modelcontextprotocol/server-gdrive"],
+          command: "google-docs-mcp",
+          args: [],
           env: {
-            GOOGLE_CREDENTIALS: process.env.GOOGLE_CREDENTIALS!,
+            SERVICE_ACCOUNT_PATH: serviceAccountPath,
+            ...(process.env.GOOGLE_IMPERSONATE_USER ? { GOOGLE_IMPERSONATE_USER: process.env.GOOGLE_IMPERSONATE_USER } : {}),
           },
         },
+        } : {}),
         github: {
           command: "npx",
           args: ["-y", "@modelcontextprotocol/server-github"],
@@ -93,6 +107,11 @@ async function runAgentOnce(
   })) {
     if ("result" in message) {
       result = message.result;
+    }
+  }
+  } finally {
+    if (serviceAccountPath) {
+      fs.rmSync(serviceAccountPath, { force: true });
     }
   }
 

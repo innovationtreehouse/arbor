@@ -70,7 +70,7 @@ COPY package.json ./
 
 # Pre-install the pre-built MCP servers so npx doesn't fetch at runtime
 RUN npm install -g \
-  @modelcontextprotocol/server-gdrive \
+  @a-bonus/google-docs-mcp \
   @modelcontextprotocol/server-github
 
 ENV NODE_ENV=production
