@@ -153,6 +153,7 @@ async function handleCommand(rawBody: string) {
   const params = new URLSearchParams(rawBody);
   const userId = params.get("user_id") ?? "";
   const text = (params.get("text") ?? "").trim();
+  const responseUrl = params.get("response_url") ?? "";
 
   const adminIds = (process.env.ADMIN_USER_IDS ?? "")
     .split(",")
@@ -165,37 +166,44 @@ async function handleCommand(rawBody: string) {
 
   const [subcommand, ...args] = text.split(/\s+/);
 
-  switch (subcommand) {
-    case "list":
-      return handleList();
-    case "add":
-      return handleAdd(args, userId);
-    case "remove":
-      return handleRemove(args);
-    case "test":
-      return handleTest(args);
-    case "model":
-      return handleModel(args);
-    case "audit":
-      return handleAudit(args);
-    case "audit-thread":
-      return handleAuditThread(args);
-    case "token-limit":
-      return handleTokenLimit(args);
-    default:
-      return ephemeral(
-        `*${AGENT_NAME} Admin Commands:*\n` +
-          "• `/squirrel-admin list` — show all configured URLs\n" +
-          "• `/squirrel-admin add <url> <description>` — add a URL to the allowlist\n" +
-          "• `/squirrel-admin remove <url>` — remove a URL\n" +
-          "• `/squirrel-admin test <url>` — preview URL content\n" +
-          "• `/squirrel-admin model [<model-id>]` — show or set the active Claude model\n" +
-          "• `/squirrel-admin audit [<limit>]` — show recent agent interactions\n" +
-          "• `/squirrel-admin audit-thread <channel> <thread_ts>` — show interactions for a thread\n" +
-          "• `/squirrel-admin token-limit [<channel|default> [<limit>]]` — show or set per-channel token limit\n" +
-          "• `/squirrel-admin help` — show this message"
-      );
+  // Help and unknown subcommands respond inline (no DB work, always fast).
+  if (!subcommand || subcommand === "help") {
+    return ephemeral(
+      `*${AGENT_NAME} Admin Commands:*\n` +
+        "• `/squirrel-admin list` — show all configured URLs\n" +
+        "• `/squirrel-admin add <url> <description>` — add a URL to the allowlist\n" +
+        "• `/squirrel-admin remove <url>` — remove a URL\n" +
+        "• `/squirrel-admin test <url>` — preview URL content\n" +
+        "• `/squirrel-admin model [<model-id>]` — show or set the active Claude model\n" +
+        "• `/squirrel-admin audit [<limit>]` — show recent agent interactions\n" +
+        "• `/squirrel-admin audit-thread <channel> <thread_ts>` — show interactions for a thread\n" +
+        "• `/squirrel-admin token-limit [<channel|default> [<limit>]]` — show or set per-channel token limit\n" +
+        "• `/squirrel-admin help` — show this message"
+    );
   }
+
+  // All other subcommands hit the DB. Enqueue via SQS so Lambda can return
+  // the 200 ack to Slack within 3 seconds. The agent picks up the message
+  // and posts the result to response_url (valid for 30 minutes).
+  await ensureAgentRunning().catch((err) => {
+    console.error("ensureAgentRunning failed:", err);
+    throw err;
+  });
+
+  await sqsClient.send(
+    new SendMessageCommand({
+      QueueUrl: process.env.SQS_QUEUE_URL!,
+      MessageBody: JSON.stringify({
+        type: "admin_command",
+        subcommand,
+        args,
+        userId,
+        responseUrl,
+      }),
+    })
+  );
+
+  return { statusCode: 200, body: "" };
 }
 
 async function handleList() {

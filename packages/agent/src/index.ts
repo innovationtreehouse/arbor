@@ -3,12 +3,13 @@ import {
   ReceiveMessageCommand,
   DeleteMessageCommand,
 } from "@aws-sdk/client-sqs";
-import { PostgresConfigStore, PostgresAuditStore } from "@arbor/db";
+import { PostgresConfigStore, PostgresAuditStore, PostgresUrlStore } from "@arbor/db";
 import { createAuditLogger } from "@arbor/logger";
 import { fetchThreadHistory, postMessage, postEphemeral } from "./slack.js";
 import { runAgent } from "./agent.js";
 import { buildPrompt, buildSystemPrompt } from "./prompt.js";
 import { BatchBuffer, type BatchEvent } from "./batch-buffer.js";
+import { processAdminCommand } from "./admin.js";
 
 export type SlackEvent = BatchEvent & { holdoff?: boolean };
 
@@ -17,7 +18,9 @@ if (!DATABASE_URL) throw new Error("DATABASE_URL is required");
 
 const sqsClient = new SQSClient({ region: process.env.AWS_REGION });
 const configStore = new PostgresConfigStore(DATABASE_URL);
-const auditLogger = createAuditLogger(new PostgresAuditStore(DATABASE_URL));
+const urlStore = new PostgresUrlStore(DATABASE_URL);
+const auditStore = new PostgresAuditStore(DATABASE_URL);
+const auditLogger = createAuditLogger(auditStore);
 const IDLE_TIMEOUT_MS =
   parseInt(process.env.IDLE_TIMEOUT ?? "15", 10) * 60 * 1000;
 const SQS_WAIT_SECONDS = 20;
@@ -87,11 +90,16 @@ async function main(): Promise<void> {
     const sqsMessage = result.Messages[0];
 
     try {
-      const event: SlackEvent = JSON.parse(sqsMessage.Body!);
-      if (event.holdoff) {
-        batchBuffer.add(event);
+      const parsed = JSON.parse(sqsMessage.Body!);
+      if (parsed.type === "admin_command") {
+        await processAdminCommand(parsed, { urlStore, configStore, auditStore });
       } else {
-        await processEvent(event);
+        const event: SlackEvent = parsed;
+        if (event.holdoff) {
+          batchBuffer.add(event);
+        } else {
+          await processEvent(event);
+        }
       }
     } catch (err) {
       console.error("Failed to process event:", err);
