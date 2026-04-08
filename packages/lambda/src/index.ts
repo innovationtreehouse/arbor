@@ -14,8 +14,10 @@ const ecsClient = new ECSClient({});
 const configStore = new PostgresConfigStore(process.env.DATABASE_URL!);
 const rateLimiter = new ChannelRateLimiter(configStore);
 const AGENT_NAME = process.env.AGENT_NAME ?? "Squirrel";
-declare const __GIT_SHA__: string;
-declare const __BUILD_TIME__: string;
+declare const __GIT_SHA__: string | undefined;
+declare const __BUILD_TIME__: string | undefined;
+const GIT_SHA = typeof __GIT_SHA__ !== "undefined" ? __GIT_SHA__ : "dev";
+const BUILD_TIME = typeof __BUILD_TIME__ !== "undefined" ? __BUILD_TIME__ : "unknown";
 
 // ---------------------------------------------------------------------------
 // Signature verification
@@ -187,7 +189,7 @@ async function handleCommand(rawBody: string) {
         "• `/squirrel-admin token-limit [<channel|default> [<limit>]]` — show or set per-channel token limit\n" +
         "• `/squirrel-admin check` — verify connectivity to all data sources\n" +
         "• `/squirrel-admin help` — show this message\n" +
-        "_Built `" + __GIT_SHA__ + "` at " + __BUILD_TIME__ + "_"
+        "_Built `" + GIT_SHA + "` at " + BUILD_TIME + "_"
     );
   }
 
