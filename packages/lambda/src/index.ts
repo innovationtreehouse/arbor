@@ -137,7 +137,7 @@ async function ensureAgentRunning() {
   await ecsClient.send(
     new RunTaskCommand({
       cluster: process.env.ECS_CLUSTER!,
-      taskDefinition: process.env.ECS_TASK_DEFINITION!,
+      taskDefinition: process.env.ECS_TASK_FAMILY!,
       launchType: "FARGATE",
       networkConfiguration: {
         awsvpcConfiguration: {

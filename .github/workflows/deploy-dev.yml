@@ -151,10 +151,6 @@ jobs:
             --function-name arbor-webhook-dev \
             --s3-bucket $BUCKET \
             --s3-key arbor-webhook/$SHA.zip
-          aws lambda wait function-updated --function-name arbor-webhook-dev
-          aws lambda update-function-configuration \
-            --function-name arbor-webhook-dev \
-            --handler index.handler
 
       - name: Wait for Lambda update (dev)
         run: aws lambda wait function-updated --function-name arbor-webhook-dev
@@ -179,17 +175,6 @@ jobs:
             --cli-input-json file:///tmp/task-def.json \
             --query 'taskDefinition.taskDefinitionArn' --output text)
           echo "task_def_arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
-          # Keep Lambda's ECS_TASK_DEFINITION env var in sync with the new revision
-          TASK_DEF_SHORT=$(aws ecs describe-task-definition \
-            --task-definition "$TASK_DEF_ARN" \
-            --query 'taskDefinition.{f:family,r:revision}' --output text \
-            | awk '{print $1 ":" $2}')
-          aws lambda update-function-configuration \
-            --function-name arbor-webhook-dev \
-            --environment "$(aws lambda get-function-configuration \
-              --function-name arbor-webhook-dev \
-              --query 'Environment' --output json \
-              | jq --arg v "$TASK_DEF_SHORT" '.Variables.ECS_TASK_DEFINITION = $v')"
 
       - name: Update ECS service (dev)
         run: |
