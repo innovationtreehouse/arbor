@@ -93,11 +93,27 @@ jobs:
           # Store digest in SSM. --no-overwrite means a second run for the same
           # SHA fails loudly rather than silently replacing a previously written
           # digest, preventing a compromised runner from swapping it after the fact.
-          aws ssm put-parameter \
+          # If the parameter already exists (re-run of same SHA), verify the digest
+          # matches rather than failing — idempotent re-runs are safe, swapped
+          # digests are not.
+          EXISTING=$(aws ssm get-parameter \
             --name "/arbor/artifacts/$SHA/sha256" \
-            --value "$DIGEST" \
-            --type String \
-            --no-overwrite
+            --query Parameter.Value --output text 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            if [ "$EXISTING" != "$DIGEST" ]; then
+              echo "Digest mismatch for existing SSM parameter — possible tampering"
+              echo "  stored:   $EXISTING"
+              echo "  computed: $DIGEST"
+              exit 1
+            fi
+            echo "SSM parameter already exists with matching digest — skipping write."
+          else
+            aws ssm put-parameter \
+              --name "/arbor/artifacts/$SHA/sha256" \
+              --value "$DIGEST" \
+              --type String \
+              --no-overwrite
+          fi
 
       - name: Run database migrations (dev)
         # Runs drizzle-kit migrate in a short-lived ECS task inside the VPC,
