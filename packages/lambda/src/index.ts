@@ -182,6 +182,7 @@ async function handleCommand(rawBody: string) {
         "• `/squirrel-admin audit [<limit>]` — show recent agent interactions\n" +
         "• `/squirrel-admin audit-thread <channel> <thread_ts>` — show interactions for a thread\n" +
         "• `/squirrel-admin token-limit [<channel|default> [<limit>]]` — show or set per-channel token limit\n" +
+        "• `/squirrel-admin check` — verify connectivity to all data sources\n" +
         "• `/squirrel-admin help` — show this message"
     );
   }

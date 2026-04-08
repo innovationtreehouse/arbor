@@ -47,6 +47,9 @@ export async function processAdminCommand(cmd: AdminCommand, stores: Stores): Pr
       case "token-limit":
         text = await handleTokenLimit(args, configStore);
         break;
+      case "check":
+        text = await handleCheck(urlStore);
+        break;
       default:
         text = `Unknown subcommand: \`${subcommand}\`. Try \`/squirrel-admin help\`.`;
     }
@@ -164,4 +167,134 @@ async function handleTokenLimit(args: string[], configStore: ConfigStore): Promi
   const current = await configStore.get(key);
   if (current === undefined) return `No token limit set for ${label} (unlimited).`;
   return `Token limit for ${label}: *${current}* tokens per request.`;
+}
+
+async function handleCheck(urlStore: UrlStore): Promise<string> {
+  const results: string[] = [];
+
+  // Google Drive
+  const googleCreds = process.env.GOOGLE_CREDENTIALS;
+  if (!googleCreds) {
+    results.push("❌ *Google Drive*: `GOOGLE_CREDENTIALS` not set");
+  } else {
+    try {
+      const creds = JSON.parse(googleCreds);
+      const requiredFields = ["client_email", "private_key", "project_id"];
+      const missing = requiredFields.filter((f) => !creds[f]);
+      if (missing.length > 0) {
+        results.push(`❌ *Google Drive*: credentials JSON missing fields: ${missing.join(", ")}`);
+      } else {
+        // Try a lightweight Drive API call using the service account JWT
+        const driveResult = await checkGoogleDrive(creds);
+        results.push(driveResult);
+      }
+    } catch {
+      results.push("❌ *Google Drive*: `GOOGLE_CREDENTIALS` is not valid JSON");
+    }
+  }
+
+  // GitHub
+  const githubToken = process.env.GITHUB_TOKEN;
+  if (!githubToken) {
+    results.push("❌ *GitHub*: `GITHUB_TOKEN` not set");
+  } else {
+    try {
+      const res = await fetch("https://api.github.com/user", {
+        headers: { Authorization: `Bearer ${githubToken}`, "User-Agent": "Squirrel-Bot/1.0" },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (res.ok) {
+        const user = await res.json() as { login?: string };
+        results.push(`✅ *GitHub*: authenticated as \`${user.login ?? "unknown"}\``);
+      } else {
+        results.push(`❌ *GitHub*: API returned HTTP ${res.status}`);
+      }
+    } catch (err) {
+      results.push(`❌ *GitHub*: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Anthropic API key
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicKey) {
+    results.push("❌ *Anthropic API*: `ANTHROPIC_API_KEY` not set");
+  } else if (!anthropicKey.startsWith("sk-ant-")) {
+    results.push("⚠️ *Anthropic API*: key set but format looks unexpected");
+  } else {
+    results.push(`✅ *Anthropic API*: key configured (\`${anthropicKey.slice(0, 12)}…\`)`);
+  }
+
+  // URL fetcher / database
+  try {
+    const count = await urlStore.count();
+    results.push(`✅ *URL fetcher*: database reachable, ${count} URL${count === 1 ? "" : "s"} configured`);
+  } catch (err) {
+    results.push(`❌ *URL fetcher*: database error — ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  return `*Data source health check:*\n${results.join("\n")}`;
+}
+
+async function checkGoogleDrive(creds: {
+  client_email: string;
+  private_key: string;
+  project_id: string;
+}): Promise<string> {
+  try {
+    // Build a JWT to obtain an access token for the Drive API
+    const now = Math.floor(Date.now() / 1000);
+    const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({
+      iss: creds.client_email,
+      scope: "https://www.googleapis.com/auth/drive.readonly",
+      aud: "https://oauth2.googleapis.com/token",
+      exp: now + 3600,
+      iat: now,
+    })).toString("base64url");
+
+    const { createSign } = await import("crypto");
+    const sign = createSign("RSA-SHA256");
+    sign.update(`${header}.${payload}`);
+    const signature = sign.sign(creds.private_key, "base64url");
+    const jwt = `${header}.${payload}.${signature}`;
+
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        assertion: jwt,
+      }),
+      signal: AbortSignal.timeout(8_000),
+    });
+
+    if (!tokenRes.ok) {
+      const body = await tokenRes.text();
+      return `❌ *Google Drive*: auth failed (${tokenRes.status}) — ${body.slice(0, 120)}`;
+    }
+
+    const { access_token } = await tokenRes.json() as { access_token: string };
+
+    // List up to 1 file to verify access
+    const driveRes = await fetch(
+      "https://www.googleapis.com/drive/v3/files?pageSize=1&fields=files(id,name)",
+      {
+        headers: { Authorization: `Bearer ${access_token}` },
+        signal: AbortSignal.timeout(8_000),
+      }
+    );
+
+    if (!driveRes.ok) {
+      return `❌ *Google Drive*: authenticated but Drive API returned HTTP ${driveRes.status}`;
+    }
+
+    const { files } = await driveRes.json() as { files: { id: string; name: string }[] };
+    const fileCount = files.length;
+    const note = fileCount === 0
+      ? " (no files visible — share content with the service account)"
+      : ` (${fileCount} file${fileCount === 1 ? "" : "s"} visible)`;
+    return `✅ *Google Drive*: authenticated as \`${creds.client_email}\`${note}`;
+  } catch (err) {
+    return `❌ *Google Drive*: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }
