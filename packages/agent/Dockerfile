@@ -73,6 +73,15 @@ RUN npm install -g \
   @a-bonus/google-docs-mcp \
   @modelcontextprotocol/server-github
 
+# Patch google-docs-mcp to add corpora=allDrives to every files.list call
+# so it can see Shared Drive content for service accounts.
+# The package sets supportsAllDrives/includeItemsFromAllDrives but omits corpora,
+# which causes files.list to default to corpora=user (only owned files).
+RUN find /usr/local/lib/node_modules/@a-bonus/google-docs-mcp/dist -name "*.js" \
+  -exec sed -i \
+    's/includeItemsFromAllDrives: true,/includeItemsFromAllDrives: true, corpora: '"'"'allDrives'"'"',/g' \
+    {} \;
+
 ENV NODE_ENV=production
 
 CMD ["node", "/app/packages/agent/dist/index.js"]

@@ -278,7 +278,7 @@ async function checkGoogleDrive(creds: {
     // List up to 1 file to verify access. includeItemsFromAllDrives and
     // supportsAllDrives are required to see files in Shared Drives.
     const driveRes = await fetch(
-      "https://www.googleapis.com/drive/v3/files?pageSize=1&fields=files(id,name)&includeItemsFromAllDrives=true&supportsAllDrives=true",
+      "https://www.googleapis.com/drive/v3/files?pageSize=1&fields=files(id,name)&includeItemsFromAllDrives=true&supportsAllDrives=true&corpora=allDrives",
       {
         headers: { Authorization: `Bearer ${access_token}` },
         signal: AbortSignal.timeout(8_000),
