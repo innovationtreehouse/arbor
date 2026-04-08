@@ -65,7 +65,16 @@ async function runAgentOnce(
   if (credentialsJson) {
     serviceAccountPath = path.join(os.tmpdir(), `sa-credentials-${process.pid}.json`);
     fs.writeFileSync(serviceAccountPath, credentialsJson, { mode: 0o600 });
+    console.log("[agent] GOOGLE_CREDENTIALS present, gdrive MCP will be started");
+  } else {
+    console.warn("[agent] GOOGLE_CREDENTIALS not set — gdrive MCP will not start");
   }
+
+  console.log("[agent] MCP servers:", JSON.stringify({
+    gdrive: !!serviceAccountPath,
+    github: !!process.env.GITHUB_TOKEN,
+    urlFetcher: true,
+  }));
 
   let result = "";
 
