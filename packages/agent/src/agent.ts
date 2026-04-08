@@ -115,8 +115,8 @@ async function runAgentOnce(
       mcpServers: {
         ...(serviceAccountPath ? {
         gdrive: {
-          command: "google-docs-mcp",
-          args: [],
+          command: "node",
+          args: ["/usr/local/lib/node_modules/@a-bonus/google-docs-mcp/dist/index.js"],
           env: {
             SERVICE_ACCOUNT_PATH: serviceAccountPath,
             ...(process.env.GOOGLE_IMPERSONATE_USER ? { GOOGLE_IMPERSONATE_USER: process.env.GOOGLE_IMPERSONATE_USER } : {}),
