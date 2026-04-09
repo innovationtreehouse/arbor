@@ -1,5 +1,7 @@
 .claude/
 node_modules/
+setup-shared.sh
+setup-per-env.sh
 dist/
 *.js.map
 *.tsbuildinfo
