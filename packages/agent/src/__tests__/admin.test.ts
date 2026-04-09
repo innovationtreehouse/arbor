@@ -456,6 +456,58 @@ describe("check", () => {
 });
 
 // ---------------------------------------------------------------------------
+// prompt
+// ---------------------------------------------------------------------------
+
+describe("prompt", () => {
+  it("shows default prompt when no override is set", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce(undefined);
+    const text = await runCommand("prompt", ["show"]);
+    expect(text).toContain("default (from code)");
+    expect(text).toContain("Google Drive");
+  });
+
+  it("shows override prompt when one is set", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce("You are a custom bot.");
+    const text = await runCommand("prompt", ["show"]);
+    expect(text).toContain("custom override");
+    expect(text).toContain("You are a custom bot.");
+  });
+
+  it("show is the default subcommand", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce(undefined);
+    const text = await runCommand("prompt", []);
+    expect(text).toContain("default (from code)");
+  });
+
+  it("sets a custom system prompt", async () => {
+    const text = await runCommand("prompt", ["set", "You", "are", "a", "test", "bot."]);
+    expect(text).toContain("✅");
+    expect(mockConfigStore.set).toHaveBeenCalledWith("prompt:system", "You are a test bot.");
+  });
+
+  it("rejects set with no text", async () => {
+    const text = await runCommand("prompt", ["set"]);
+    expect(text).toContain("Usage:");
+  });
+
+  it("resets to default", async () => {
+    const text = await runCommand("prompt", ["reset"]);
+    expect(text).toContain("✅");
+    expect(mockConfigStore.set).toHaveBeenCalledWith("prompt:system", "");
+    expect(text).toContain("Google Drive"); // shows the default in the confirmation
+  });
+
+  it("returns error for unknown subcommand", async () => {
+    const text = await runCommand("prompt", ["frobnicate"]);
+    expect(text).toContain("Unknown prompt subcommand");
+    expect(text).toContain("show");
+    expect(text).toContain("set");
+    expect(text).toContain("reset");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // unknown subcommand + error handling
 // ---------------------------------------------------------------------------
 

@@ -1,4 +1,5 @@
 import type { UrlStore, ConfigStore, AuditStore } from "@arbor/db";
+import { buildSystemPrompt, defaultSystemPrompt } from "./prompt.js";
 
 interface AdminCommand {
   type: "admin_command";
@@ -49,6 +50,9 @@ export async function processAdminCommand(cmd: AdminCommand, stores: Stores): Pr
         break;
       case "check":
         text = await handleCheck(urlStore);
+        break;
+      case "prompt":
+        text = await handlePrompt(args, configStore);
         break;
       default:
         text = `Unknown subcommand: \`${subcommand}\`. Try \`/squirrel-admin help\`.`;
@@ -233,6 +237,33 @@ async function handleCheck(urlStore: UrlStore): Promise<string> {
   }
 
   return `*Data source health check:*\n${results.join("\n")}`;
+}
+
+async function handlePrompt(args: string[], configStore: ConfigStore): Promise<string> {
+  const [subcmd, ...rest] = args;
+
+  if (!subcmd || subcmd === "show") {
+    const override = await configStore.get("prompt:system");
+    const active = buildSystemPrompt(override || undefined);
+    const source = override ? "custom override" : "default (from code)";
+    const preview = active.length > 2500 ? active.slice(0, 2500) + "…" : active;
+    return `*Active system prompt (${source}):*\n\`\`\`\n${preview}\n\`\`\``;
+  }
+
+  if (subcmd === "set") {
+    if (rest.length === 0) return "Usage: `/squirrel-admin prompt set <prompt text>`";
+    const newPrompt = rest.join(" ");
+    await configStore.set("prompt:system", newPrompt);
+    const preview = newPrompt.length > 500 ? newPrompt.slice(0, 500) + "…" : newPrompt;
+    return `✅ System prompt updated. Takes effect on the next message.\n\`\`\`\n${preview}\n\`\`\``;
+  }
+
+  if (subcmd === "reset") {
+    await configStore.set("prompt:system", "");
+    return `✅ System prompt reset to default. Takes effect on the next message.\n\`\`\`\n${defaultSystemPrompt()}\n\`\`\``;
+  }
+
+  return `Unknown prompt subcommand: \`${subcmd}\`. Available: \`show\`, \`set <text>\`, \`reset\`.`;
 }
 
 async function checkGoogleDrive(creds: {

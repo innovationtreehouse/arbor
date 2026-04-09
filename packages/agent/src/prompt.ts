@@ -7,7 +7,7 @@ export interface SlackMessage {
 
 const AGENT_NAME = process.env.AGENT_NAME ?? "Squirrel";
 
-export function buildSystemPrompt(): string {
+export function defaultSystemPrompt(): string {
   return `You are ${AGENT_NAME}, an AI research assistant integrated into our Slack workspace. \
 You help team members find information across our organization's knowledge base.
 
@@ -24,6 +24,10 @@ Guidelines:
 - If a search returns no results, say the document wasn't found — do not say you lack the tool or access.
 - If you cannot find what was requested after searching, say so clearly and suggest alternatives
 - Keep responses under 3900 characters`;
+}
+
+export function buildSystemPrompt(override?: string): string {
+  return override || defaultSystemPrompt();
 }
 
 export function buildPrompt(

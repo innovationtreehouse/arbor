@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPrompt, buildSystemPrompt } from "../prompt.js";
+import { buildPrompt, buildSystemPrompt, defaultSystemPrompt } from "../prompt.js";
 import type { SlackMessage } from "../prompt.js";
 
 describe("buildSystemPrompt", () => {
@@ -12,6 +12,18 @@ describe("buildSystemPrompt", () => {
 
   it("includes character limit guidance", () => {
     expect(buildSystemPrompt()).toContain("3900");
+  });
+
+  it("returns the override when provided", () => {
+    expect(buildSystemPrompt("custom prompt")).toBe("custom prompt");
+  });
+
+  it("returns the default when override is undefined", () => {
+    expect(buildSystemPrompt(undefined)).toBe(defaultSystemPrompt());
+  });
+
+  it("returns the default when override is empty string", () => {
+    expect(buildSystemPrompt("" || undefined)).toBe(defaultSystemPrompt());
   });
 });
 
