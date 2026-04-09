@@ -94,6 +94,11 @@ describe("processEvent", () => {
     expect(postEphemeral).toHaveBeenCalledWith("C_CHAN", "U1", "_Searching…_");
   });
 
+  it("does not post ephemeral when requires_discretion is true", async () => {
+    await processEvent({ ...baseEvent, requires_discretion: true });
+    expect(postEphemeral).not.toHaveBeenCalled();
+  });
+
   it("fetches thread history, runs agent, and posts response", async () => {
     const history = [{ user: "U1", text: "earlier message" }];
     vi.mocked(fetchThreadHistory).mockResolvedValueOnce(history);
@@ -103,9 +108,21 @@ describe("processEvent", () => {
 
     expect(fetchThreadHistory).toHaveBeenCalledWith("C_CHAN", "1.0");
     expect(buildPrompt).toHaveBeenCalledWith(history, baseEvent.text, undefined, []);
-    expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined);
+    expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined, { requiresDiscretion: false });
     expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", undefined, undefined);
     expect(postMessage).toHaveBeenCalledWith("C_CHAN", "1.0", "Here is your answer.");
+  });
+
+  it("passes requiresDiscretion: true to buildSystemPrompt when set on event", async () => {
+    await processEvent({ ...baseEvent, requires_discretion: true });
+    expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined, { requiresDiscretion: true });
+  });
+
+  it("does not post or audit when agent returns the no-reply sentinel", async () => {
+    vi.mocked(runAgent).mockResolvedValueOnce("__NO_REPLY__");
+    await processEvent({ ...baseEvent, requires_discretion: true });
+    expect(postMessage).not.toHaveBeenCalled();
+    expect(mockAuditLog).not.toHaveBeenCalled();
   });
 
   it("passes model from configStore to runAgent", async () => {

@@ -116,8 +116,8 @@ async function handleEvent(rawBody: string) {
     return { statusCode: 200, body: "" };
   }
 
-  // If BOT_USER_ID is set, skip channel messages that @mention the bot — app_mention
-  // will handle those, avoiding double-processing the same message.
+  // Skip channel messages that @mention the bot — app_mention handles those,
+  // ensuring exactly one reply per mention with no discretion applied.
   const botUserId = process.env.BOT_USER_ID;
   if (isChannelMessage && botUserId && ev?.text?.includes(`<@${botUserId}>`)) {
     return { statusCode: 200, body: "" };
@@ -131,17 +131,25 @@ async function handleEvent(rawBody: string) {
   const channel = ev.channel as string;
   const holdoff = await rateLimiter.recordAndCheck(channel);
 
+  // is_mention: agent must always reply, no discretion
+  // requires_discretion: agent applies judgment about whether to reply
+  const is_mention = isAppMention;
+  const requires_discretion = isChannelMessage || (!is_mention && !isDirectMessage);
+
   await sqsClient.send(
     new SendMessageCommand({
       QueueUrl: process.env.SQS_QUEUE_URL!,
       MessageBody: JSON.stringify({
         channel,
+        channel_type: isDirectMessage ? "im" : "channel",
         thread_ts: ev.thread_ts ?? ev.ts,
         is_thread: !!ev.thread_ts && ev.thread_ts !== ev.ts,
         event_ts: ev.ts,
         user: ev.user,
         text: ev.text,
         holdoff,
+        is_mention,
+        requires_discretion,
       }),
     })
   );

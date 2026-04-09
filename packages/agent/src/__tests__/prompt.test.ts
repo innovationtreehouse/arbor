@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPrompt, buildSystemPrompt, defaultSystemPrompt, DEFAULT_USER_PROMPT_TEMPLATE } from "../prompt.js";
+import { buildPrompt, buildSystemPrompt, defaultSystemPrompt, DEFAULT_USER_PROMPT_TEMPLATE, NO_REPLY_SENTINEL } from "../prompt.js";
 import { getUserDocs } from "../user-docs.js";
 import type { SlackMessage } from "../prompt.js";
 
@@ -46,6 +46,21 @@ describe("buildSystemPrompt", () => {
   it("includes user documentation", () => {
     const result = buildSystemPrompt();
     expect(result).toContain(getUserDocs());
+  });
+
+  it("does not include discretion instructions by default", () => {
+    expect(buildSystemPrompt()).not.toContain(NO_REPLY_SENTINEL);
+  });
+
+  it("includes discretion instructions and sentinel when requiresDiscretion is true", () => {
+    const result = buildSystemPrompt(undefined, undefined, { requiresDiscretion: true });
+    expect(result).toContain(NO_REPLY_SENTINEL);
+    expect(result).toContain("Reply discretion");
+  });
+
+  it("does not include discretion instructions when requiresDiscretion is false", () => {
+    const result = buildSystemPrompt(undefined, undefined, { requiresDiscretion: false });
+    expect(result).not.toContain(NO_REPLY_SENTINEL);
   });
 });
 
