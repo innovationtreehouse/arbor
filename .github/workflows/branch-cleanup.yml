@@ -1,0 +1,63 @@
+name: Branch cleanup
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"  # Every Monday at 04:00 UTC
+  workflow_dispatch:      # Allow manual runs
+
+permissions:
+  contents: write  # required to delete branches
+
+jobs:
+  cleanup:
+    name: Delete stale branches
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Delete branches with no activity in the last 7 days
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          CUTOFF_DAYS: 7
+        run: |
+          CUTOFF=$(date -d "-${CUTOFF_DAYS} days" +%s)
+          DELETED=0
+          SKIPPED=0
+
+          # Fetch all branches except main
+          BRANCHES=$(gh api "repos/$REPO/branches?per_page=100&protected=false" \
+            --paginate --jq '.[].name' | grep -v '^main$')
+
+          for BRANCH in $BRANCHES; do
+            # Skip branches with an open PR (including draft)
+            PR=$(gh api "repos/$REPO/pulls?head=${REPO%/*}:$BRANCH&state=open&per_page=1" \
+              --jq '.[0].number' 2>/dev/null || echo "")
+            if [ -n "$PR" ] && [ "$PR" != "null" ]; then
+              echo "skip: $BRANCH (open PR #$PR)"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            # Get the date of the most recent commit on this branch
+            LAST_COMMIT=$(gh api "repos/$REPO/commits?sha=$BRANCH&per_page=1" \
+              --jq '.[0].commit.committer.date' 2>/dev/null || echo "")
+            if [ -z "$LAST_COMMIT" ] || [ "$LAST_COMMIT" = "null" ]; then
+              echo "skip: $BRANCH (could not read last commit date)"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            LAST_COMMIT_TS=$(date -d "$LAST_COMMIT" +%s 2>/dev/null || echo "0")
+            if [ "$LAST_COMMIT_TS" -gt "$CUTOFF" ]; then
+              echo "skip: $BRANCH (active — last commit $(date -d "$LAST_COMMIT" +%Y-%m-%d))"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            echo "delete: $BRANCH (last commit $(date -d "$LAST_COMMIT" +%Y-%m-%d))"
+            gh api --method DELETE "repos/$REPO/git/refs/heads/$BRANCH"
+            DELETED=$((DELETED + 1))
+          done
+
+          echo ""
+          echo "Done: $DELETED deleted, $SKIPPED skipped."
