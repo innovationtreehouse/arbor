@@ -30,9 +30,15 @@ export function buildSystemPrompt(override?: string): string {
   return override || defaultSystemPrompt();
 }
 
+// The user prompt template wraps thread context around the current message.
+// Placeholders: {{context}} = formatted prior messages, {{message}} = current text.
+export const DEFAULT_USER_PROMPT_TEMPLATE =
+  `Thread context:\n{{context}}\n\nCurrent message:\n{{message}}`;
+
 export function buildPrompt(
   history: SlackMessage[],
-  currentText: string
+  currentText: string,
+  template?: string
 ): string {
   // If there's no prior context, return just the current message
   if (history.length <= 1) {
@@ -41,12 +47,14 @@ export function buildPrompt(
 
   // All messages except the last (which is the current message being handled)
   const prior = history.slice(0, -1);
-  const formatted = prior
+  const context = prior
     .map((msg) => {
       const author = msg.bot_id ? AGENT_NAME : `User <${msg.user ?? "unknown"}>`;
       return `${author}: ${msg.text ?? ""}`;
     })
     .join("\n");
 
-  return `Thread context:\n${formatted}\n\nCurrent message:\n${currentText}`;
+  return (template || DEFAULT_USER_PROMPT_TEMPLATE)
+    .replace("{{context}}", context)
+    .replace("{{message}}", currentText);
 }

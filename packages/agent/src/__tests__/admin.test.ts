@@ -460,42 +460,98 @@ describe("check", () => {
 // ---------------------------------------------------------------------------
 
 describe("prompt", () => {
-  it("shows default prompt when no override is set", async () => {
-    vi.mocked(mockConfigStore.get).mockResolvedValueOnce(undefined);
+  it("show with no args shows both prompts", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValue(undefined);
     const text = await runCommand("prompt", ["show"]);
+    expect(text).toContain("System prompt");
+    expect(text).toContain("User prompt template");
     expect(text).toContain("default (from code)");
-    expect(text).toContain("Google Drive");
   });
 
-  it("shows override prompt when one is set", async () => {
+  it("show is the default subcommand", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValue(undefined);
+    const text = await runCommand("prompt", []);
+    expect(text).toContain("System prompt");
+    expect(text).toContain("User prompt template");
+  });
+
+  it("show system shows only system prompt", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce("Custom system.");
+    const text = await runCommand("prompt", ["show", "system"]);
+    expect(text).toContain("System prompt");
+    expect(text).toContain("custom override");
+    expect(text).not.toContain("User prompt template");
+  });
+
+  it("show user shows only user prompt template", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce(undefined);
+    const text = await runCommand("prompt", ["show", "user"]);
+    expect(text).toContain("User prompt template");
+    expect(text).not.toContain("System prompt");
+  });
+
+  it("shows custom override when set", async () => {
     vi.mocked(mockConfigStore.get).mockResolvedValueOnce("You are a custom bot.");
-    const text = await runCommand("prompt", ["show"]);
+    const text = await runCommand("prompt", ["show", "system"]);
     expect(text).toContain("custom override");
     expect(text).toContain("You are a custom bot.");
   });
 
-  it("show is the default subcommand", async () => {
-    vi.mocked(mockConfigStore.get).mockResolvedValueOnce(undefined);
-    const text = await runCommand("prompt", []);
-    expect(text).toContain("default (from code)");
-  });
-
-  it("sets a custom system prompt", async () => {
-    const text = await runCommand("prompt", ["set", "You", "are", "a", "test", "bot."]);
+  it("sets system prompt", async () => {
+    const text = await runCommand("prompt", ["set", "system", "You", "are", "a", "test", "bot."]);
     expect(text).toContain("✅");
     expect(mockConfigStore.set).toHaveBeenCalledWith("prompt:system", "You are a test bot.");
   });
 
-  it("rejects set with no text", async () => {
+  it("sets user prompt template", async () => {
+    const text = await runCommand("prompt", ["set", "user", "CTX:{{context}}", "MSG:{{message}}"]);
+    expect(text).toContain("✅");
+    expect(mockConfigStore.set).toHaveBeenCalledWith("prompt:user", "CTX:{{context}} MSG:{{message}}");
+  });
+
+  it("rejects set with missing target", async () => {
     const text = await runCommand("prompt", ["set"]);
     expect(text).toContain("Usage:");
   });
 
-  it("resets to default", async () => {
+  it("rejects set with invalid target", async () => {
+    const text = await runCommand("prompt", ["set", "banana", "some text"]);
+    expect(text).toContain("Usage:");
+  });
+
+  it("rejects set with valid target but no text", async () => {
+    const text = await runCommand("prompt", ["set", "system"]);
+    expect(text).toContain("Usage:");
+  });
+
+  it("resets system prompt only", async () => {
+    const text = await runCommand("prompt", ["reset", "system"]);
+    expect(text).toContain("✅");
+    expect(mockConfigStore.set).toHaveBeenCalledWith("prompt:system", "");
+    expect(mockConfigStore.set).toHaveBeenCalledTimes(1);
+    expect(text).toContain("Google Drive");
+  });
+
+  it("resets user prompt only", async () => {
+    const text = await runCommand("prompt", ["reset", "user"]);
+    expect(text).toContain("✅");
+    expect(mockConfigStore.set).toHaveBeenCalledWith("prompt:user", "");
+    expect(mockConfigStore.set).toHaveBeenCalledTimes(1);
+    expect(text).toContain("{{context}}");
+  });
+
+  it("resets both prompts when no target given", async () => {
     const text = await runCommand("prompt", ["reset"]);
     expect(text).toContain("✅");
     expect(mockConfigStore.set).toHaveBeenCalledWith("prompt:system", "");
-    expect(text).toContain("Google Drive"); // shows the default in the confirmation
+    expect(mockConfigStore.set).toHaveBeenCalledWith("prompt:user", "");
+    expect(text).toContain("Google Drive");
+    expect(text).toContain("{{context}}");
+  });
+
+  it("rejects reset with invalid target", async () => {
+    const text = await runCommand("prompt", ["reset", "banana"]);
+    expect(text).toContain("Unknown prompt target");
   });
 
   it("returns error for unknown subcommand", async () => {
