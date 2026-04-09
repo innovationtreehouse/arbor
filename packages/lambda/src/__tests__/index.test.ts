@@ -258,10 +258,9 @@ describe("/slack/events", () => {
     delete process.env.BOT_USER_ID;
   });
 
-  it("drops channel messages when channel_messages setting is not 'on'", async () => {
+  it("drops top-level channel messages when channel_messages setting is not 'on'", async () => {
     ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
     sqsMock.on(SendMessageCommand).resolves({});
-    // configStore.get returns undefined by default (off)
 
     const event = { type: "message", channel_type: "channel", channel: "C1", ts: "5.0", text: "anyone know the policy?", user: "U1" };
     const body = JSON.stringify({ type: "event_callback", event });
@@ -271,7 +270,7 @@ describe("/slack/events", () => {
     expect(sqsMock.calls()).toHaveLength(0);
   });
 
-  it("forwards channel messages when channel_messages setting is 'on'", async () => {
+  it("forwards top-level channel messages when channel_messages setting is 'on'", async () => {
     ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
     sqsMock.on(SendMessageCommand).resolves({});
     vi.mocked(mockConfigStore.get).mockResolvedValueOnce("on");
@@ -284,6 +283,22 @@ describe("/slack/events", () => {
     expect(sqsMock.calls()).toHaveLength(1);
   });
 
+  it("forwards thread replies with requires_discretion:true regardless of channel_messages setting", async () => {
+    ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
+    sqsMock.on(SendMessageCommand).resolves({});
+    // channel_messages is off (default) — but thread replies always get through
+
+    const event = { type: "message", channel_type: "channel", channel: "C1", ts: "7.0", thread_ts: "1.0", text: "following up on this", user: "U1" };
+    const body = JSON.stringify({ type: "event_callback", event });
+
+    const res = await handler(makeEvent({ body }), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    expect(sqsMock.calls()).toHaveLength(1);
+    const sent = JSON.parse(sqsMock.calls()[0].args[0].input.MessageBody!);
+    expect(sent.requires_discretion).toBe(true);
+    expect(sent.is_mention).toBe(false);
+  });
+
   it("forwards message.im events to SQS", async () => {
     ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
     sqsMock.on(SendMessageCommand).resolves({});
@@ -293,8 +308,8 @@ describe("/slack/events", () => {
 
     const res = await handler(makeEvent({ body }), {} as any, {} as any);
     expect(res?.statusCode).toBe(200);
-    const sent = JSON.parse(sqsMock.calls()[0].args[0].input.MessageBody!);
-    expect(sent.channel).toBe("D1");
+    const sent2 = JSON.parse(sqsMock.calls()[0].args[0].input.MessageBody!);
+    expect(sent2.channel).toBe("D1");
   });
 
   it("skips channel messages that @mention the bot when BOT_USER_ID is set", async () => {
