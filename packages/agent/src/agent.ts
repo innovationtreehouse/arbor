@@ -115,13 +115,18 @@ async function runAgentOnce(
       mcpServers: {
         ...(serviceAccountPath ? {
         gdrive: {
-          // Use absolute node path rather than the binary name. When the Agent
-          // SDK spawns the child process it may not inherit /usr/local/bin in
-          // PATH (especially inside ECS), so the short name silently fails.
+          // Use absolute node path — the MCP SDK only inherits a minimal env
+          // (HOME, PATH, SHELL, USER) when spawning subprocesses, so the short
+          // binary name may not be on PATH inside ECS.
           command: "node",
           args: ["/usr/local/lib/node_modules/@a-bonus/google-docs-mcp/dist/index.js"],
           env: {
             SERVICE_ACCOUNT_PATH: serviceAccountPath,
+            // NODE_PATH is required so the globally-installed package can
+            // resolve its own dependencies (fastmcp, googleapis, etc.).
+            // The MCP SDK only inherits a small allowlist of env vars and
+            // NODE_PATH is not among them.
+            NODE_PATH: "/usr/local/lib/node_modules",
             ...(process.env.GOOGLE_IMPERSONATE_USER ? { GOOGLE_IMPERSONATE_USER: process.env.GOOGLE_IMPERSONATE_USER } : {}),
           },
         },
