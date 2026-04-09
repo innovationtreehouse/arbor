@@ -14,7 +14,12 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["packages/*/src/**/*.ts"],
-      exclude: ["packages/*/src/**/*.test.ts"],
+      exclude: [
+        "packages/*/src/**/*.test.ts",
+        // Runtime infrastructure — spawns external processes and HTTP servers,
+        // not meaningful to unit-test in isolation.
+        "packages/agent/src/gdrive-mcp-proxy.ts",
+      ],
       reporter: ["text", "html", "lcov"],
       thresholds: {
         lines: 90,
