@@ -177,8 +177,15 @@ describe("/slack/events", () => {
     expect(JSON.parse(res?.body ?? "")).toEqual({ challenge: "abc123" });
   });
 
-  it("ignores non-mention events", async () => {
-    const body = JSON.stringify({ type: "event_callback", event: { type: "message" } });
+  it("ignores non-message event types", async () => {
+    const body = JSON.stringify({ type: "event_callback", event: { type: "reaction_added" } });
+    const res = await handler(makeEvent({ body }), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    expect(sqsMock.calls()).toHaveLength(0);
+  });
+
+  it("ignores message events with a subtype (edits, deletions)", async () => {
+    const body = JSON.stringify({ type: "event_callback", event: { type: "message", subtype: "message_changed", channel_type: "channel" } });
     const res = await handler(makeEvent({ body }), {} as any, {} as any);
     expect(res?.statusCode).toBe(200);
     expect(sqsMock.calls()).toHaveLength(0);
@@ -205,6 +212,48 @@ describe("/slack/events", () => {
     expect(res?.statusCode).toBe(200);
     expect(sqsMock.calls()).toHaveLength(1);
     expect(ecsMock.commandCalls(RunTaskCommand)).toHaveLength(0);
+  });
+
+  it("forwards message.channels events to SQS", async () => {
+    ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
+    sqsMock.on(SendMessageCommand).resolves({});
+
+    const event = { type: "message", channel_type: "channel", channel: "C1", ts: "2.0", text: "anyone know where the policy doc is?", user: "U1" };
+    const body = JSON.stringify({ type: "event_callback", event });
+
+    const res = await handler(makeEvent({ body }), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    expect(sqsMock.calls()).toHaveLength(1);
+    const sent = JSON.parse(sqsMock.calls()[0].args[0].input.MessageBody!);
+    expect(sent.channel).toBe("C1");
+    expect(sent.text).toBe("anyone know where the policy doc is?");
+  });
+
+  it("forwards message.im events to SQS", async () => {
+    ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
+    sqsMock.on(SendMessageCommand).resolves({});
+
+    const event = { type: "message", channel_type: "im", channel: "D1", ts: "3.0", text: "find the travel policy", user: "U1" };
+    const body = JSON.stringify({ type: "event_callback", event });
+
+    const res = await handler(makeEvent({ body }), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    const sent = JSON.parse(sqsMock.calls()[0].args[0].input.MessageBody!);
+    expect(sent.channel).toBe("D1");
+  });
+
+  it("skips channel messages that @mention the bot when BOT_USER_ID is set", async () => {
+    process.env.BOT_USER_ID = "U_BOT";
+    ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
+    sqsMock.on(SendMessageCommand).resolves({});
+
+    const event = { type: "message", channel_type: "channel", channel: "C1", ts: "4.0", text: "<@U_BOT> find something", user: "U1" };
+    const body = JSON.stringify({ type: "event_callback", event });
+
+    const res = await handler(makeEvent({ body }), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    expect(sqsMock.calls()).toHaveLength(0); // app_mention will handle this
+    delete process.env.BOT_USER_ID;
   });
 
   it("starts ECS task when not running, then forwards to SQS", async () => {

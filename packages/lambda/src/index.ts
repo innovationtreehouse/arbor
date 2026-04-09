@@ -77,12 +77,13 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 };
 
 // ---------------------------------------------------------------------------
-// Event handler (app_mention)
+// Event handler (app_mention, message.channels, message.im)
 // ---------------------------------------------------------------------------
 
 async function handleEvent(rawBody: string) {
   const body = JSON.parse(rawBody);
-  console.log("event type:", body.type, "event subtype:", body.event?.type, "bot_id:", body.event?.bot_id);
+  const ev = body.event;
+  console.log("event type:", body.type, "event subtype:", ev?.type, "channel_type:", ev?.channel_type, "bot_id:", ev?.bot_id);
 
   // URL verification handshake
   if (body.type === "url_verification") {
@@ -93,12 +94,32 @@ async function handleEvent(rawBody: string) {
     };
   }
 
-  if (body.type !== "event_callback" || body.event?.type !== "app_mention") {
+  if (body.type !== "event_callback") {
     return { statusCode: 200, body: "" };
   }
 
   // Ignore bot messages (prevent self-loops)
-  if (body.event?.bot_id) {
+  if (ev?.bot_id) {
+    return { statusCode: 200, body: "" };
+  }
+
+  // Ignore message edits, deletions, and other subtypes
+  if (ev?.type === "message" && ev?.subtype) {
+    return { statusCode: 200, body: "" };
+  }
+
+  const isAppMention = ev?.type === "app_mention";
+  const isChannelMessage = ev?.type === "message" && ev?.channel_type === "channel";
+  const isDirectMessage = ev?.type === "message" && ev?.channel_type === "im";
+
+  if (!isAppMention && !isChannelMessage && !isDirectMessage) {
+    return { statusCode: 200, body: "" };
+  }
+
+  // If BOT_USER_ID is set, skip channel messages that @mention the bot — app_mention
+  // will handle those, avoiding double-processing the same message.
+  const botUserId = process.env.BOT_USER_ID;
+  if (isChannelMessage && botUserId && ev?.text?.includes(`<@${botUserId}>`)) {
     return { statusCode: 200, body: "" };
   }
 
@@ -107,7 +128,7 @@ async function handleEvent(rawBody: string) {
     throw err;
   });
 
-  const channel = body.event.channel as string;
+  const channel = ev.channel as string;
   const holdoff = await rateLimiter.recordAndCheck(channel);
 
   await sqsClient.send(
@@ -115,10 +136,10 @@ async function handleEvent(rawBody: string) {
       QueueUrl: process.env.SQS_QUEUE_URL!,
       MessageBody: JSON.stringify({
         channel,
-        thread_ts: body.event.thread_ts ?? body.event.ts,
-        event_ts: body.event.ts,
-        user: body.event.user,
-        text: body.event.text,
+        thread_ts: ev.thread_ts ?? ev.ts,
+        event_ts: ev.ts,
+        user: ev.user,
+        text: ev.text,
         holdoff,
       }),
     })
@@ -184,6 +205,9 @@ async function handleCommand(rawBody: string) {
         "• `/squirrel-admin remove <url>` — remove a URL\n" +
         "• `/squirrel-admin test <url>` — preview URL content\n" +
         "• `/squirrel-admin model [<model-id>]` — show or set the active Claude model\n" +
+        "• `/squirrel-admin prompt show [system|user]` — show active prompt(s)\n" +
+        "• `/squirrel-admin prompt set system|user <text>` — override a prompt\n" +
+        "• `/squirrel-admin prompt reset [system|user]` — reset prompt(s) to default\n" +
         "• `/squirrel-admin audit [<limit>]` — show recent agent interactions\n" +
         "• `/squirrel-admin audit-thread <channel> <thread_ts>` — show interactions for a thread\n" +
         "• `/squirrel-admin token-limit [<channel|default> [<limit>]]` — show or set per-channel token limit\n" +
