@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPrompt, buildSystemPrompt, defaultSystemPrompt } from "../prompt.js";
+import { buildPrompt, buildSystemPrompt, defaultSystemPrompt, DEFAULT_USER_PROMPT_TEMPLATE } from "../prompt.js";
 import type { SlackMessage } from "../prompt.js";
 
 describe("buildSystemPrompt", () => {
@@ -57,9 +57,7 @@ describe("buildPrompt", () => {
       { user: "U1", text: "this is the current one" },
     ];
     const result = buildPrompt(history, "this is the current one");
-    // The prior message appears in context
     expect(result).toContain("earlier");
-    // The current message appears only once in the "Current message:" section
     const occurrences = result.split("this is the current one").length - 1;
     expect(occurrences).toBe(1);
   });
@@ -88,5 +86,29 @@ describe("buildPrompt", () => {
       { user: "U1", text: "current" },
     ];
     expect(() => buildPrompt(history, "current")).not.toThrow();
+  });
+
+  it("uses a custom template when provided", () => {
+    const history: SlackMessage[] = [
+      { user: "U1", text: "prior" },
+      { user: "U1", text: "current" },
+    ];
+    const result = buildPrompt(history, "current", "CTX:{{context}} MSG:{{message}}");
+    expect(result).toContain("CTX:");
+    expect(result).toContain("MSG:current");
+    expect(result).toContain("prior");
+  });
+
+  it("falls back to default template when undefined", () => {
+    const history: SlackMessage[] = [
+      { user: "U1", text: "prior" },
+      { user: "U1", text: "current" },
+    ];
+    expect(buildPrompt(history, "current", undefined)).toContain("Thread context:");
+  });
+
+  it("DEFAULT_USER_PROMPT_TEMPLATE contains both placeholders", () => {
+    expect(DEFAULT_USER_PROMPT_TEMPLATE).toContain("{{context}}");
+    expect(DEFAULT_USER_PROMPT_TEMPLATE).toContain("{{message}}");
   });
 });

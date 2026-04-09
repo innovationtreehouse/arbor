@@ -100,7 +100,7 @@ describe("processEvent", () => {
     await processEvent(baseEvent);
 
     expect(fetchThreadHistory).toHaveBeenCalledWith("C_CHAN", "1.0");
-    expect(buildPrompt).toHaveBeenCalledWith(history, baseEvent.text);
+    expect(buildPrompt).toHaveBeenCalledWith(history, baseEvent.text, undefined);
     expect(buildSystemPrompt).toHaveBeenCalled();
     expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", undefined, undefined);
     expect(postMessage).toHaveBeenCalledWith("C_CHAN", "1.0", "Here is your answer.");

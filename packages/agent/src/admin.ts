@@ -1,5 +1,5 @@
 import type { UrlStore, ConfigStore, AuditStore } from "@arbor/db";
-import { buildSystemPrompt, defaultSystemPrompt } from "./prompt.js";
+import { buildSystemPrompt, defaultSystemPrompt, DEFAULT_USER_PROMPT_TEMPLATE } from "./prompt.js";
 
 interface AdminCommand {
   type: "admin_command";
@@ -239,31 +239,66 @@ async function handleCheck(urlStore: UrlStore): Promise<string> {
   return `*Data source health check:*\n${results.join("\n")}`;
 }
 
+const PROMPT_TARGETS = ["system", "user"] as const;
+type PromptTarget = (typeof PROMPT_TARGETS)[number];
+
+function promptKey(target: PromptTarget): string {
+  return `prompt:${target}`;
+}
+
+function promptDefault(target: PromptTarget): string {
+  return target === "system" ? defaultSystemPrompt() : DEFAULT_USER_PROMPT_TEMPLATE;
+}
+
+function promptLabel(target: PromptTarget): string {
+  return target === "system" ? "System prompt" : "User prompt template";
+}
+
 async function handlePrompt(args: string[], configStore: ConfigStore): Promise<string> {
   const [subcmd, ...rest] = args;
 
   if (!subcmd || subcmd === "show") {
-    const override = await configStore.get("prompt:system");
-    const active = buildSystemPrompt(override || undefined);
-    const source = override ? "custom override" : "default (from code)";
-    const preview = active.length > 2500 ? active.slice(0, 2500) + "…" : active;
-    return `*Active system prompt (${source}):*\n\`\`\`\n${preview}\n\`\`\``;
+    // show [system|user] — default shows both
+    const targets: PromptTarget[] = rest[0] === "system" ? ["system"]
+      : rest[0] === "user" ? ["user"]
+      : ["system", "user"];
+
+    const parts: string[] = [];
+    for (const target of targets) {
+      const override = await configStore.get(promptKey(target));
+      const active = override || promptDefault(target);
+      const source = override ? "custom override" : "default (from code)";
+      const preview = active.length > 1500 ? active.slice(0, 1500) + "…" : active;
+      parts.push(`*${promptLabel(target)} (${source}):*\n\`\`\`\n${preview}\n\`\`\``);
+    }
+    return parts.join("\n\n");
   }
 
   if (subcmd === "set") {
-    if (rest.length === 0) return "Usage: `/squirrel-admin prompt set <prompt text>`";
-    const newPrompt = rest.join(" ");
-    await configStore.set("prompt:system", newPrompt);
+    const [target, ...textParts] = rest;
+    if (!PROMPT_TARGETS.includes(target as PromptTarget) || textParts.length === 0) {
+      return "Usage: `/squirrel-admin prompt set system|user <text>`";
+    }
+    const newPrompt = textParts.join(" ");
+    await configStore.set(promptKey(target as PromptTarget), newPrompt);
     const preview = newPrompt.length > 500 ? newPrompt.slice(0, 500) + "…" : newPrompt;
-    return `✅ System prompt updated. Takes effect on the next message.\n\`\`\`\n${preview}\n\`\`\``;
+    return `✅ ${promptLabel(target as PromptTarget)} updated. Takes effect on the next message.\n\`\`\`\n${preview}\n\`\`\``;
   }
 
   if (subcmd === "reset") {
-    await configStore.set("prompt:system", "");
-    return `✅ System prompt reset to default. Takes effect on the next message.\n\`\`\`\n${defaultSystemPrompt()}\n\`\`\``;
+    const [target] = rest;
+    if (target && !PROMPT_TARGETS.includes(target as PromptTarget)) {
+      return `Unknown prompt target: \`${target}\`. Use \`system\` or \`user\`.`;
+    }
+    const targets: PromptTarget[] = target ? [target as PromptTarget] : ["system", "user"];
+    for (const t of targets) {
+      await configStore.set(promptKey(t), "");
+    }
+    const resetList = targets.map((t) => `*${promptLabel(t)}:*\n\`\`\`\n${promptDefault(t)}\n\`\`\``).join("\n\n");
+    return `✅ ${targets.length === 1 ? promptLabel(targets[0]) : "Both prompts"} reset to default. Takes effect on the next message.\n\n${resetList}`;
   }
 
-  return `Unknown prompt subcommand: \`${subcmd}\`. Available: \`show\`, \`set <text>\`, \`reset\`.`;
+  return `Unknown prompt subcommand: \`${subcmd}\`. Available: \`show [system|user]\`, \`set system|user <text>\`, \`reset [system|user]\`.`;
 }
 
 async function checkGoogleDrive(creds: {
