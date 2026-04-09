@@ -564,6 +564,43 @@ describe("prompt", () => {
 });
 
 // ---------------------------------------------------------------------------
+// channel-messages
+// ---------------------------------------------------------------------------
+
+describe("channel-messages", () => {
+  it("shows off status when not set", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce(undefined);
+    const text = await runCommand("channel-messages", []);
+    expect(text).toContain("off");
+    expect(text).toContain("default");
+  });
+
+  it("shows on status when enabled", async () => {
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce("on");
+    const text = await runCommand("channel-messages", []);
+    expect(text).toContain("on");
+  });
+
+  it("turns channel messages on", async () => {
+    const text = await runCommand("channel-messages", ["on"]);
+    expect(text).toContain("on");
+    expect(mockConfigStore.set).toHaveBeenCalledWith("channel_messages", "on");
+  });
+
+  it("turns channel messages off", async () => {
+    const text = await runCommand("channel-messages", ["off"]);
+    expect(text).toContain("off");
+    expect(mockConfigStore.set).toHaveBeenCalledWith("channel_messages", "off");
+  });
+
+  it("rejects invalid setting", async () => {
+    const text = await runCommand("channel-messages", ["maybe"]);
+    expect(text).toContain("Usage:");
+    expect(mockConfigStore.set).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // unknown subcommand + error handling
 // ---------------------------------------------------------------------------
 

@@ -215,9 +215,10 @@ describe("/slack/events", () => {
     expect(sent.requires_discretion).toBe(false);
   });
 
-  it("forwards message.channels with is_mention:false and requires_discretion:true", async () => {
+  it("forwards message.channels with is_mention:false and requires_discretion:true (when channel_messages=on)", async () => {
     ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
     sqsMock.on(SendMessageCommand).resolves({});
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce("on"); // channel_messages=on
 
     const event = { type: "message", channel_type: "channel", channel: "C1", ts: "2.0", text: "anyone know the travel policy?", user: "U1" };
     const body = JSON.stringify({ type: "event_callback", event });
@@ -257,19 +258,30 @@ describe("/slack/events", () => {
     delete process.env.BOT_USER_ID;
   });
 
-  it("forwards message.channels events to SQS", async () => {
+  it("drops channel messages when channel_messages setting is not 'on'", async () => {
     ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
     sqsMock.on(SendMessageCommand).resolves({});
+    // configStore.get returns undefined by default (off)
 
-    const event = { type: "message", channel_type: "channel", channel: "C1", ts: "2.0", text: "anyone know where the policy doc is?", user: "U1" };
+    const event = { type: "message", channel_type: "channel", channel: "C1", ts: "5.0", text: "anyone know the policy?", user: "U1" };
+    const body = JSON.stringify({ type: "event_callback", event });
+
+    const res = await handler(makeEvent({ body }), {} as any, {} as any);
+    expect(res?.statusCode).toBe(200);
+    expect(sqsMock.calls()).toHaveLength(0);
+  });
+
+  it("forwards channel messages when channel_messages setting is 'on'", async () => {
+    ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
+    sqsMock.on(SendMessageCommand).resolves({});
+    vi.mocked(mockConfigStore.get).mockResolvedValueOnce("on");
+
+    const event = { type: "message", channel_type: "channel", channel: "C1", ts: "6.0", text: "anyone know the policy?", user: "U1" };
     const body = JSON.stringify({ type: "event_callback", event });
 
     const res = await handler(makeEvent({ body }), {} as any, {} as any);
     expect(res?.statusCode).toBe(200);
     expect(sqsMock.calls()).toHaveLength(1);
-    const sent = JSON.parse(sqsMock.calls()[0].args[0].input.MessageBody!);
-    expect(sent.channel).toBe("C1");
-    expect(sent.text).toBe("anyone know where the policy doc is?");
   });
 
   it("forwards message.im events to SQS", async () => {
