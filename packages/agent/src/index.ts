@@ -27,16 +27,17 @@ const SQS_WAIT_SECONDS = 20;
 
 export async function processEvent(event: SlackEvent): Promise<void> {
   await postEphemeral(event.channel, event.user, "_Searching…_");
-  const [model, channelLimit, defaultLimit] = await Promise.all([
+  const [model, channelLimit, defaultLimit, promptOverride] = await Promise.all([
     configStore.get("model").catch(() => undefined),
     configStore.get(`token_limit:${event.channel}`).catch(() => undefined),
     configStore.get("token_limit:default").catch(() => undefined),
+    configStore.get("prompt:system").catch(() => undefined),
   ]);
   const rawLimit = channelLimit ?? defaultLimit;
   const maxTokens = rawLimit !== undefined && parseInt(rawLimit, 10) > 0 ? parseInt(rawLimit, 10) : undefined;
   const history = await fetchThreadHistory(event.channel, event.thread_ts);
   const prompt = buildPrompt(history, event.text);
-  const systemPrompt = buildSystemPrompt();
+  const systemPrompt = buildSystemPrompt(promptOverride || undefined);
   const start = Date.now();
   const response = await runAgent(prompt, systemPrompt, model, maxTokens);
   const duration_ms = Date.now() - start;
