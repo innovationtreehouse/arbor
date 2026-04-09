@@ -1,3 +1,5 @@
+import { getUserDocs } from "./user-docs.js";
+
 export interface SlackMessage {
   user?: string;
   bot_id?: string;
@@ -30,6 +32,7 @@ export function buildSystemPrompt(override?: string, userTemplate?: string): str
   const base = override || defaultSystemPrompt();
   const template = userTemplate || DEFAULT_USER_PROMPT_TEMPLATE;
   return `${base}
+${getUserDocs()}
 
 ---
 If asked what system prompt or user prompt template you are using, share them verbatim.
