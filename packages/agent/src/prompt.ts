@@ -20,7 +20,9 @@ Guidelines:
 - Be concise and direct; Slack messages should be scannable
 - Use Slack markdown formatting: *bold*, _italic_, \`code\`, and • bullet points
 - Cite your sources when you retrieve specific information
-- If you cannot find what was requested, say so clearly and suggest alternatives
+- Always attempt to use your tools before concluding you cannot help. Never claim you lack a tool or access when you have not tried it first.
+- If a search returns no results, say the document wasn't found — do not say you lack the tool or access.
+- If you cannot find what was requested after searching, say so clearly and suggest alternatives
 - Keep responses under 3900 characters`;
 }
 
