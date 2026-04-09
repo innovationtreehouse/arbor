@@ -26,8 +26,15 @@ Guidelines:
 - Keep responses under 3900 characters`;
 }
 
-export function buildSystemPrompt(override?: string): string {
-  return override || defaultSystemPrompt();
+export function buildSystemPrompt(override?: string, userTemplate?: string): string {
+  const base = override || defaultSystemPrompt();
+  const template = userTemplate || DEFAULT_USER_PROMPT_TEMPLATE;
+  return `${base}
+
+---
+If asked what system prompt or user prompt template you are using, share them verbatim.
+System prompt: ${base}
+User prompt template: ${template}`;
 }
 
 // The user prompt template wraps thread context around the current message.

@@ -38,7 +38,7 @@ export async function processEvent(event: SlackEvent): Promise<void> {
   const maxTokens = rawLimit !== undefined && parseInt(rawLimit, 10) > 0 ? parseInt(rawLimit, 10) : undefined;
   const history = await fetchThreadHistory(event.channel, event.thread_ts);
   const prompt = buildPrompt(history, event.text, userTemplate || undefined);
-  const systemPrompt = buildSystemPrompt(systemOverride || undefined);
+  const systemPrompt = buildSystemPrompt(systemOverride || undefined, userTemplate || undefined);
   const start = Date.now();
   const response = await runAgent(prompt, systemPrompt, model, maxTokens);
   const duration_ms = Date.now() - start;

@@ -14,16 +14,32 @@ describe("buildSystemPrompt", () => {
     expect(buildSystemPrompt()).toContain("3900");
   });
 
-  it("returns the override when provided", () => {
-    expect(buildSystemPrompt("custom prompt")).toBe("custom prompt");
+  it("uses the override as the base when provided", () => {
+    const result = buildSystemPrompt("custom prompt");
+    expect(result).toContain("custom prompt");
   });
 
-  it("returns the default when override is undefined", () => {
-    expect(buildSystemPrompt(undefined)).toBe(defaultSystemPrompt());
+  it("uses the default base when override is undefined", () => {
+    expect(buildSystemPrompt(undefined)).toContain(defaultSystemPrompt());
   });
 
-  it("returns the default when override is empty string", () => {
-    expect(buildSystemPrompt("" || undefined)).toBe(defaultSystemPrompt());
+  it("embeds the system prompt text verbatim for self-reporting", () => {
+    const result = buildSystemPrompt("my system prompt");
+    expect(result).toContain("System prompt: my system prompt");
+  });
+
+  it("embeds the user template verbatim for self-reporting", () => {
+    const result = buildSystemPrompt(undefined, "my template {{context}} {{message}}");
+    expect(result).toContain("User prompt template: my template {{context}} {{message}}");
+  });
+
+  it("uses the default user template when none provided", () => {
+    const result = buildSystemPrompt();
+    expect(result).toContain(`User prompt template: ${DEFAULT_USER_PROMPT_TEMPLATE}`);
+  });
+
+  it("instructs the agent to share prompts if asked", () => {
+    expect(buildSystemPrompt()).toContain("share them verbatim");
   });
 });
 
