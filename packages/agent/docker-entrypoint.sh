@@ -1,0 +1,35 @@
+#!/bin/sh
+set -e
+
+# Write Google credentials to a temp file for the gdrive proxy.
+if [ -n "$GOOGLE_CREDENTIALS" ]; then
+  export SERVICE_ACCOUNT_PATH="/tmp/sa-credentials.json"
+  printf '%s' "$GOOGLE_CREDENTIALS" > "$SERVICE_ACCOUNT_PATH"
+  chmod 600 "$SERVICE_ACCOUNT_PATH"
+fi
+
+# Start the gdrive MCP proxy if credentials are present.
+if [ -n "$SERVICE_ACCOUNT_PATH" ]; then
+  PROXY_PORT="${GDRIVE_MCP_PORT:-8123}"
+  export GDRIVE_MCP_PROXY_URL="http://127.0.0.1:${PROXY_PORT}/mcp"
+
+  echo "[entrypoint] Starting gdrive MCP proxy on port ${PROXY_PORT}..."
+  node /app/packages/agent/dist/gdrive-mcp-proxy.js &
+  PROXY_PID=$!
+
+  # Wait up to 30s for the proxy to become healthy.
+  i=0
+  until wget -qO- "http://127.0.0.1:${PROXY_PORT}/health" >/dev/null 2>&1; do
+    i=$((i + 1))
+    if [ "$i" -ge 30 ]; then
+      echo "[entrypoint] ERROR: gdrive proxy did not become healthy after 30s"
+      exit 1
+    fi
+    sleep 1
+  done
+  echo "[entrypoint] Proxy ready after ${i}s"
+else
+  echo "[entrypoint] GOOGLE_CREDENTIALS not set — gdrive MCP proxy not started"
+fi
+
+exec node /app/packages/agent/dist/index.js
