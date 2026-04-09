@@ -88,7 +88,7 @@ describe("runAgent", () => {
         yield { result: "ok" };
       })()
     );
-    process.env.GOOGLE_CREDENTIALS = '{"type":"service_account"}';
+    process.env.GDRIVE_MCP_PROXY_URL = "http://127.0.0.1:8123/mcp";
     process.env.GITHUB_TOKEN = "ghp_test";
 
     await runAgent("prompt", "system");
