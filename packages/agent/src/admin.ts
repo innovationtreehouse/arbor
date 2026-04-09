@@ -275,26 +275,48 @@ async function checkGoogleDrive(creds: {
 
     const { access_token } = await tokenRes.json() as { access_token: string };
 
-    // List up to 1 file to verify access. includeItemsFromAllDrives and
-    // supportsAllDrives are required to see files in Shared Drives.
-    const driveRes = await fetch(
-      "https://www.googleapis.com/drive/v3/files?pageSize=1&fields=files(id,name)&includeItemsFromAllDrives=true&supportsAllDrives=true&corpora=allDrives",
-      {
-        headers: { Authorization: `Bearer ${access_token}` },
-        signal: AbortSignal.timeout(8_000),
-      }
-    );
+    const headers = { Authorization: `Bearer ${access_token}` };
+    const timeout = { signal: AbortSignal.timeout(8_000) };
 
-    if (!driveRes.ok) {
-      return `❌ *Google Drive*: authenticated but Drive API returned HTTP ${driveRes.status}`;
+    // List up to 10 files visible to the service account (all drives).
+    const [fileRes, drivesRes] = await Promise.all([
+      fetch(
+        "https://www.googleapis.com/drive/v3/files?pageSize=10&fields=files(id,name)&includeItemsFromAllDrives=true&supportsAllDrives=true&corpora=allDrives",
+        { headers, ...timeout }
+      ),
+      // drives.list returns Shared Drives the service account is a member of.
+      fetch(
+        "https://www.googleapis.com/drive/v3/drives?pageSize=20&fields=drives(id,name)",
+        { headers, ...timeout }
+      ),
+    ]);
+
+    if (!fileRes.ok) {
+      return `❌ *Google Drive*: authenticated but files.list returned HTTP ${fileRes.status}`;
     }
 
-    const { files } = await driveRes.json() as { files: { id: string; name: string }[] };
-    const fileCount = files.length;
-    const note = fileCount === 0
-      ? " (no files visible — share files or folders directly with the service account email)"
-      : ` (${fileCount} file${fileCount === 1 ? "" : "s"} visible)`;
-    return `✅ *Google Drive*: authenticated as \`${creds.client_email}\`${note}`;
+    const { files } = await fileRes.json() as { files: { id: string; name: string }[] };
+
+    const lines: string[] = [
+      `✅ *Google Drive*: authenticated as \`${creds.client_email}\``,
+    ];
+
+    if (files.length === 0) {
+      lines.push("  • No files visible (share files or folders directly with the service account email)");
+    } else {
+      lines.push(`  • ${files.length} file${files.length === 1 ? "" : "s"} visible`);
+    }
+
+    if (drivesRes.ok) {
+      const { drives } = await drivesRes.json() as { drives: { id: string; name: string }[] };
+      if (drives.length === 0) {
+        lines.push("  • No Shared Drive memberships (to grant access: open the Shared Drive → Manage members → add the service account email)");
+      } else {
+        lines.push(`  • Member of ${drives.length} Shared Drive${drives.length === 1 ? "" : "s"}: ${drives.map((d) => `_${d.name}_`).join(", ")}`);
+      }
+    }
+
+    return lines.join("\n");
   } catch (err) {
     return `❌ *Google Drive*: ${err instanceof Error ? err.message : String(err)}`;
   }
