@@ -54,6 +54,9 @@ export async function processAdminCommand(cmd: AdminCommand, stores: Stores): Pr
       case "prompt":
         text = await handlePrompt(args, configStore);
         break;
+      case "channel-messages":
+        text = await handleChannelMessages(args, configStore);
+        break;
       default:
         text = `Unknown subcommand: \`${subcommand}\`. Try \`/squirrel-admin help\`.`;
     }
@@ -299,6 +302,24 @@ async function handlePrompt(args: string[], configStore: ConfigStore): Promise<s
   }
 
   return `Unknown prompt subcommand: \`${subcmd}\`. Available: \`show [system|user]\`, \`set system|user <text>\`, \`reset [system|user]\`.`;
+}
+
+async function handleChannelMessages(args: string[], configStore: ConfigStore): Promise<string> {
+  const [setting] = args;
+  if (!setting) {
+    const current = await configStore.get("channel_messages");
+    const status = current === "on" ? "✅ *on*" : "❌ *off* (default)";
+    return `*Channel message responses:* ${status}\nUse \`/squirrel-admin channel-messages on|off\` to change.`;
+  }
+  if (setting !== "on" && setting !== "off") {
+    return "Usage: `/squirrel-admin channel-messages on|off`";
+  }
+  await configStore.set("channel_messages", setting);
+  const emoji = setting === "on" ? "✅" : "❌";
+  const detail = setting === "on"
+    ? "The bot will now respond to all channel messages (with discretion)."
+    : "The bot will only respond to @mentions, thread replies, and DMs.";
+  return `${emoji} Channel message responses turned *${setting}*. ${detail}`;
 }
 
 async function checkGoogleDrive(creds: {
