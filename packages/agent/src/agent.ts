@@ -115,6 +115,9 @@ async function runAgentOnce(
       mcpServers: {
         ...(serviceAccountPath ? {
         gdrive: {
+          // Use absolute node path rather than the binary name. When the Agent
+          // SDK spawns the child process it may not inherit /usr/local/bin in
+          // PATH (especially inside ECS), so the short name silently fails.
           command: "node",
           args: ["/usr/local/lib/node_modules/@a-bonus/google-docs-mcp/dist/index.js"],
           env: {

@@ -80,7 +80,9 @@ RUN npm install -g \
 RUN find /usr/local/lib/node_modules/@a-bonus/google-docs-mcp/dist -name "*.js" \
   -exec sed -i \
     's/includeItemsFromAllDrives: true,/includeItemsFromAllDrives: true, corpora: '"'"'allDrives'"'"',/g' \
-    {} \;
+    {} \; \
+  && grep -qr "corpora.*allDrives" /usr/local/lib/node_modules/@a-bonus/google-docs-mcp/dist/tools/drive/ \
+  || { echo "ERROR: corpora=allDrives patch did not apply — check package version"; exit 1; }
 
 ENV NODE_ENV=production
 
