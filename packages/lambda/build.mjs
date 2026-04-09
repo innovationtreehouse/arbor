@@ -2,7 +2,9 @@ import { build } from "esbuild";
 import { execSync } from "child_process";
 
 const sha = execSync("git rev-parse --short HEAD").toString().trim();
-const buildTime = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+// Use the commit timestamp (not wall clock) so the bundle is reproducible:
+// the same git SHA always produces the same zip, keeping the SSM digest check valid.
+const buildTime = execSync("git log -1 --format=%cI HEAD").toString().trim();
 
 await build({
   entryPoints: ["dist/index.js"],
