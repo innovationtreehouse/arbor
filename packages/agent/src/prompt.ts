@@ -39,29 +39,42 @@ User prompt template: ${template}`;
 
 // The user prompt template wraps thread context around the current message.
 // Placeholders: {{context}} = formatted prior messages, {{message}} = current text.
+// {{channel_context}} = optional compacted channel messages (thread replies only).
 export const DEFAULT_USER_PROMPT_TEMPLATE =
   `Thread context:\n{{context}}\n\nCurrent message:\n{{message}}`;
 
-export function buildPrompt(
-  history: SlackMessage[],
-  currentText: string,
-  template?: string
-): string {
-  // If there's no prior context, return just the current message
-  if (history.length <= 1) {
-    return currentText;
-  }
-
-  // All messages except the last (which is the current message being handled)
-  const prior = history.slice(0, -1);
-  const context = prior
+function formatMessages(messages: SlackMessage[]): string {
+  return messages
     .map((msg) => {
       const author = msg.bot_id ? AGENT_NAME : `User <${msg.user ?? "unknown"}>`;
       return `${author}: ${msg.text ?? ""}`;
     })
     .join("\n");
+}
 
-  return (template || DEFAULT_USER_PROMPT_TEMPLATE)
+export function buildPrompt(
+  history: SlackMessage[],
+  currentText: string,
+  template?: string,
+  channelContext: SlackMessage[] = []
+): string {
+  // If there's no prior context, return just the current message
+  if (history.length <= 1 && channelContext.length === 0) {
+    return currentText;
+  }
+
+  // All messages except the last (which is the current message being handled)
+  const prior = history.slice(0, -1);
+  const context = formatMessages(prior);
+
+  let result = (template || DEFAULT_USER_PROMPT_TEMPLATE)
     .replace("{{context}}", context)
     .replace("{{message}}", currentText);
+
+  if (channelContext.length > 0) {
+    const channelSummary = formatMessages(channelContext);
+    result = `Recent channel activity:\n${channelSummary}\n\n${result}`;
+  }
+
+  return result;
 }

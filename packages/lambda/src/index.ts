@@ -137,6 +137,7 @@ async function handleEvent(rawBody: string) {
       MessageBody: JSON.stringify({
         channel,
         thread_ts: ev.thread_ts ?? ev.ts,
+        is_thread: !!ev.thread_ts && ev.thread_ts !== ev.ts,
         event_ts: ev.ts,
         user: ev.user,
         text: ev.text,

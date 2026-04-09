@@ -8,6 +8,11 @@ const THREAD_HISTORY_LIMIT = parseInt(
   10
 );
 
+const CHANNEL_HISTORY_LIMIT = parseInt(
+  process.env.CHANNEL_HISTORY_LIMIT ?? "20",
+  10
+);
+
 export async function fetchThreadHistory(
   channel: string,
   threadTs: string
@@ -19,6 +24,21 @@ export async function fetchThreadHistory(
   });
 
   return (result.messages ?? []) as SlackMessage[];
+}
+
+// Fetches recent top-level messages from a channel or IM.
+// Excludes thread replies (replies live under their parent, not in history).
+export async function fetchChannelHistory(
+  channel: string,
+  limit = CHANNEL_HISTORY_LIMIT
+): Promise<SlackMessage[]> {
+  const result = await client.conversations.history({
+    channel,
+    limit,
+  });
+
+  // conversations.history returns messages newest-first; reverse to chronological
+  return ((result.messages ?? []) as SlackMessage[]).reverse();
 }
 
 export async function postMessage(

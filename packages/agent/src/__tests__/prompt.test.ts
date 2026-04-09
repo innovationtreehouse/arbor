@@ -127,4 +127,39 @@ describe("buildPrompt", () => {
     expect(DEFAULT_USER_PROMPT_TEMPLATE).toContain("{{context}}");
     expect(DEFAULT_USER_PROMPT_TEMPLATE).toContain("{{message}}");
   });
+
+  it("prepends channel context when provided", () => {
+    const history: SlackMessage[] = [
+      { user: "U1", text: "thread reply" },
+      { user: "U1", text: "current" },
+    ];
+    const channelContext: SlackMessage[] = [
+      { user: "U2", text: "channel msg 1" },
+      { user: "U3", text: "channel msg 2" },
+    ];
+    const result = buildPrompt(history, "current", undefined, channelContext);
+    expect(result).toContain("Recent channel activity:");
+    expect(result).toContain("channel msg 1");
+    expect(result).toContain("channel msg 2");
+    expect(result.indexOf("Recent channel activity:")).toBeLessThan(result.indexOf("Thread context:"));
+  });
+
+  it("omits channel context section when channelContext is empty", () => {
+    const history: SlackMessage[] = [
+      { user: "U1", text: "prior" },
+      { user: "U1", text: "current" },
+    ];
+    expect(buildPrompt(history, "current", undefined, [])).not.toContain("Recent channel activity:");
+  });
+
+  it("returns just current text when no history and no channel context", () => {
+    expect(buildPrompt([], "hello", undefined, [])).toBe("hello");
+  });
+
+  it("includes channel context even when thread history is minimal", () => {
+    const channelContext: SlackMessage[] = [{ user: "U2", text: "bg noise" }];
+    const result = buildPrompt([{ user: "U1", text: "current" }], "current", undefined, channelContext);
+    expect(result).toContain("Recent channel activity:");
+    expect(result).toContain("bg noise");
+  });
 });
