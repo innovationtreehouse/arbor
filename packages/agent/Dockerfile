@@ -73,16 +73,26 @@ RUN npm install -g \
   @a-bonus/google-docs-mcp \
   @modelcontextprotocol/server-github
 
-# Patch google-docs-mcp to add corpora=allDrives to every files.list call
-# so it can see Shared Drive content for service accounts.
-# The package sets supportsAllDrives/includeItemsFromAllDrives but omits corpora,
-# which causes files.list to default to corpora=user (only owned files).
+# Patch 1: add corpora=allDrives to every files.list call so the service
+# account can see Shared Drive content (not just files it owns).
 RUN find /usr/local/lib/node_modules/@a-bonus/google-docs-mcp/dist -name "*.js" \
   -exec sed -i \
     's/includeItemsFromAllDrives: true,/includeItemsFromAllDrives: true, corpora: '"'"'allDrives'"'"',/g' \
     {} \; \
   && grep -qr "corpora.*allDrives" /usr/local/lib/node_modules/@a-bonus/google-docs-mcp/dist/tools/drive/ \
   || { echo "ERROR: corpora=allDrives patch did not apply — check package version"; exit 1; }
+
+# Patch 2: remove the eager initializeGoogleClient() call that runs before
+# server.start(). The Google auth round-trip takes ~8s, which exceeds the
+# Claude Code CLI's MCP handshake timeout — the server is marked "pending"
+# and its tools are never registered. Auth already happens lazily inside
+# getDriveClient() on the first tool call, so the eager call is redundant.
+RUN sed -i \
+  '/await initializeGoogleClient();/{N;s/await initializeGoogleClient();\n//;t;s/await initializeGoogleClient();//}' \
+  /usr/local/lib/node_modules/@a-bonus/google-docs-mcp/dist/index.js \
+  && ! grep -q 'await initializeGoogleClient()' \
+     /usr/local/lib/node_modules/@a-bonus/google-docs-mcp/dist/index.js \
+  || { echo "ERROR: lazy-auth patch did not apply"; exit 1; }
 
 ENV NODE_ENV=production
 
