@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildPrompt, buildSystemPrompt, defaultSystemPrompt, DEFAULT_USER_PROMPT_TEMPLATE } from "../prompt.js";
+import { getUserDocs } from "../user-docs.js";
 import type { SlackMessage } from "../prompt.js";
 
 describe("buildSystemPrompt", () => {
@@ -40,6 +41,29 @@ describe("buildSystemPrompt", () => {
 
   it("instructs the agent to share prompts if asked", () => {
     expect(buildSystemPrompt()).toContain("share them verbatim");
+  });
+
+  it("includes user documentation", () => {
+    const result = buildSystemPrompt();
+    expect(result).toContain(getUserDocs());
+  });
+});
+
+describe("getUserDocs", () => {
+  it("includes how to interact with the bot", () => {
+    const docs = getUserDocs();
+    expect(docs).toContain("direct message");
+    expect(docs).toContain("thread");
+  });
+
+  it("describes what the bot can and cannot do", () => {
+    const docs = getUserDocs();
+    expect(docs).toContain("Google Drive");
+    expect(docs).toContain("cannot");
+  });
+
+  it("returns a non-empty string", () => {
+    expect(getUserDocs().length).toBeGreaterThan(100);
   });
 });
 
