@@ -1,8 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import * as path from "path";
-import * as fs from "fs";
-import * as os from "os";
-import { spawnSync } from "child_process";
 
 export async function runAgent(
   prompt: string,
@@ -49,67 +46,6 @@ function isTransientError(err: Error): boolean {
   );
 }
 
-/**
- * Spawns the google-docs-mcp process with the same env the MCP SDK will use,
- * sends a minimal JSON-RPC initialize request, and logs whether it responds.
- * This runs synchronously before query() so any crash appears in CloudWatch
- * before the agent loop starts — making silent MCP failures visible.
- */
-function probeGdriveMcp(serviceAccountPath: string): void {
-  const mcpScript = "/usr/local/lib/node_modules/@a-bonus/google-docs-mcp/dist/index.js";
-  const env = {
-    HOME: process.env.HOME ?? "",
-    PATH: process.env.PATH ?? "",
-    SERVICE_ACCOUNT_PATH: serviceAccountPath,
-    NODE_PATH: "/usr/local/lib/node_modules",
-    ...(process.env.GOOGLE_IMPERSONATE_USER
-      ? { GOOGLE_IMPERSONATE_USER: process.env.GOOGLE_IMPERSONATE_USER }
-      : {}),
-  };
-
-  console.log("[gdrive-probe] spawning MCP server to verify it starts...");
-  console.log("[gdrive-probe] script:", mcpScript);
-  console.log("[gdrive-probe] NODE_PATH:", env.NODE_PATH);
-  console.log("[gdrive-probe] SERVICE_ACCOUNT_PATH:", serviceAccountPath);
-
-  // Send a minimal MCP initialize request and wait up to 10 s for any response.
-  const initRequest = JSON.stringify({
-    jsonrpc: "2.0",
-    id: 1,
-    method: "initialize",
-    params: {
-      protocolVersion: "2024-11-05",
-      capabilities: {},
-      clientInfo: { name: "probe", version: "0" },
-    },
-  }) + "\n";
-
-  const result = spawnSync("node", [mcpScript], {
-    input: initRequest,
-    env,
-    timeout: 10_000,
-    encoding: "utf8",
-  });
-
-  if (result.error) {
-    console.error("[gdrive-probe] failed to spawn process:", result.error.message);
-    return;
-  }
-
-  console.log("[gdrive-probe] exit code:", result.status);
-
-  if (result.stderr) {
-    console.log("[gdrive-probe] stderr:\n" + result.stderr.trim());
-  }
-
-  if (result.stdout) {
-    // Log first 500 chars — a successful initialize response starts with {"jsonrpc":"2.0"...}
-    console.log("[gdrive-probe] stdout:", result.stdout.slice(0, 500).trim());
-  } else {
-    console.warn("[gdrive-probe] no stdout — MCP server did not respond to initialize");
-  }
-}
-
 async function runAgentOnce(
   prompt: string,
   systemPrompt: string,
@@ -121,30 +57,19 @@ async function runAgentOnce(
     "../../mcp-url-fetcher/dist/index.js"
   );
 
-  // Write service account credentials to a temp file for the GDrive MCP server
-  const credentialsJson = process.env.GOOGLE_CREDENTIALS;
-  let serviceAccountPath: string | undefined;
-  if (credentialsJson) {
-    serviceAccountPath = path.join(os.tmpdir(), `sa-credentials-${process.pid}.json`);
-    fs.writeFileSync(serviceAccountPath, credentialsJson, { mode: 0o600 });
-    console.log("[agent] GOOGLE_CREDENTIALS present, gdrive MCP will be started");
-  } else {
-    console.warn("[agent] GOOGLE_CREDENTIALS not set — gdrive MCP will not start");
-  }
+  // The gdrive MCP proxy is started at container boot (docker-entrypoint.sh).
+  // It spawns google-docs-mcp once, waits for auth, then exposes an HTTP server.
+  // Connecting via URL is instant — no per-query cold-start or handshake timeout.
+  const gdriveProxyUrl = process.env.GDRIVE_MCP_PROXY_URL;
 
   console.log("[agent] MCP servers:", JSON.stringify({
-    gdrive: !!serviceAccountPath,
+    gdrive: !!gdriveProxyUrl,
     github: !!process.env.GITHUB_TOKEN,
     urlFetcher: true,
   }));
 
-  if (serviceAccountPath) {
-    probeGdriveMcp(serviceAccountPath);
-  }
-
   let result = "";
 
-  try {
   for await (const message of query({
     prompt,
     options: {
@@ -179,23 +104,11 @@ async function runAgentOnce(
       ],
       ...(maxTokens !== undefined ? { maxTokens } : {}),
       mcpServers: {
-        ...(serviceAccountPath ? {
-        gdrive: {
-          // Use absolute node path — the MCP SDK only inherits a minimal env
-          // (HOME, PATH, SHELL, USER) when spawning subprocesses, so the short
-          // binary name may not be on PATH inside ECS.
-          command: "node",
-          args: ["/usr/local/lib/node_modules/@a-bonus/google-docs-mcp/dist/index.js"],
-          env: {
-            SERVICE_ACCOUNT_PATH: serviceAccountPath,
-            // NODE_PATH is required so the globally-installed package can
-            // resolve its own dependencies (fastmcp, googleapis, etc.).
-            // The MCP SDK only inherits a small allowlist of env vars and
-            // NODE_PATH is not among them.
-            NODE_PATH: "/usr/local/lib/node_modules",
-            ...(process.env.GOOGLE_IMPERSONATE_USER ? { GOOGLE_IMPERSONATE_USER: process.env.GOOGLE_IMPERSONATE_USER } : {}),
+        ...(gdriveProxyUrl ? {
+          gdrive: {
+            type: "http" as const,
+            url: gdriveProxyUrl,
           },
-        },
         } : {}),
         github: {
           command: "npx",
@@ -217,11 +130,6 @@ async function runAgentOnce(
   })) {
     if ("result" in message) {
       result = message.result;
-    }
-  }
-  } finally {
-    if (serviceAccountPath) {
-      fs.rmSync(serviceAccountPath, { force: true });
     }
   }
 
