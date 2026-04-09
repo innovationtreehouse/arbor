@@ -11,9 +11,14 @@ import { buildPrompt, buildSystemPrompt } from "./prompt.js";
 import { BatchBuffer, type BatchEvent } from "./batch-buffer.js";
 import { processAdminCommand } from "./admin.js";
 
+export const NO_REPLY_SENTINEL = "__NO_REPLY__";
+
 export type SlackEvent = BatchEvent & {
   holdoff?: boolean;
+  channel_type?: "channel" | "im";
+  is_mention?: boolean;
   is_thread?: boolean;
+  requires_discretion?: boolean;
 };
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -32,7 +37,13 @@ const SQS_WAIT_SECONDS = 20;
 const THREAD_CHANNEL_CONTEXT = 4;
 
 export async function processEvent(event: SlackEvent): Promise<void> {
-  await postEphemeral(event.channel, event.user, "_Searching…_");
+  // Only show the ephemeral "Searching…" when we know we'll always reply.
+  // For discretion-mode events, skip it — the bot may decide not to reply
+  // and a dangling "Searching…" with no follow-up is confusing.
+  if (!event.requires_discretion) {
+    await postEphemeral(event.channel, event.user, "_Searching…_");
+  }
+
   const [model, channelLimit, defaultLimit, systemOverride, userTemplate] = await Promise.all([
     configStore.get("model").catch(() => undefined),
     configStore.get(`token_limit:${event.channel}`).catch(() => undefined),
@@ -52,10 +63,20 @@ export async function processEvent(event: SlackEvent): Promise<void> {
     : [];
 
   const prompt = buildPrompt(history, event.text, userTemplate || undefined, channelContext);
-  const systemPrompt = buildSystemPrompt(systemOverride || undefined, userTemplate || undefined);
+  const systemPrompt = buildSystemPrompt(
+    systemOverride || undefined,
+    userTemplate || undefined,
+    { requiresDiscretion: event.requires_discretion ?? false }
+  );
   const start = Date.now();
   const response = await runAgent(prompt, systemPrompt, model, maxTokens);
   const duration_ms = Date.now() - start;
+
+  if (response === NO_REPLY_SENTINEL) {
+    console.log(`[discretion] agent elected not to reply in channel ${event.channel}`);
+    return;
+  }
+
   await postMessage(event.channel, event.thread_ts, response);
   await auditLogger.log({
     channel: event.channel,

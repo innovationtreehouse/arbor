@@ -201,17 +201,60 @@ describe("/slack/events", () => {
     expect(sqsMock.calls()).toHaveLength(0);
   });
 
-  it("forwards app_mention to SQS when ECS task is already running", async () => {
+  it("forwards app_mention with is_mention:true and requires_discretion:false", async () => {
     ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
     sqsMock.on(SendMessageCommand).resolves({ MessageId: "msg-1" });
 
     const event = { type: "app_mention", channel: "C1", ts: "1.0", thread_ts: "1.0", text: "@Squirrel hi", user: "U1" };
     const body = JSON.stringify({ type: "event_callback", event });
 
+    await handler(makeEvent({ body }), {} as any, {} as any);
+
+    const sent = JSON.parse(sqsMock.calls()[0].args[0].input.MessageBody!);
+    expect(sent.is_mention).toBe(true);
+    expect(sent.requires_discretion).toBe(false);
+  });
+
+  it("forwards message.channels with is_mention:false and requires_discretion:true", async () => {
+    ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
+    sqsMock.on(SendMessageCommand).resolves({});
+
+    const event = { type: "message", channel_type: "channel", channel: "C1", ts: "2.0", text: "anyone know the travel policy?", user: "U1" };
+    const body = JSON.stringify({ type: "event_callback", event });
+
+    await handler(makeEvent({ body }), {} as any, {} as any);
+
+    const sent = JSON.parse(sqsMock.calls()[0].args[0].input.MessageBody!);
+    expect(sent.is_mention).toBe(false);
+    expect(sent.requires_discretion).toBe(true);
+  });
+
+  it("forwards message.im with is_mention:false and requires_discretion:false", async () => {
+    ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
+    sqsMock.on(SendMessageCommand).resolves({});
+
+    const event = { type: "message", channel_type: "im", channel: "D1", ts: "3.0", text: "find the travel policy", user: "U1" };
+    const body = JSON.stringify({ type: "event_callback", event });
+
+    await handler(makeEvent({ body }), {} as any, {} as any);
+
+    const sent = JSON.parse(sqsMock.calls()[0].args[0].input.MessageBody!);
+    expect(sent.is_mention).toBe(false);
+    expect(sent.requires_discretion).toBe(false);
+  });
+
+  it("skips channel messages that @mention the bot when BOT_USER_ID is set (app_mention handles those)", async () => {
+    process.env.BOT_USER_ID = "U_BOT";
+    ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
+    sqsMock.on(SendMessageCommand).resolves({});
+
+    const event = { type: "message", channel_type: "channel", channel: "C1", ts: "4.0", text: "<@U_BOT> find something", user: "U1" };
+    const body = JSON.stringify({ type: "event_callback", event });
+
     const res = await handler(makeEvent({ body }), {} as any, {} as any);
     expect(res?.statusCode).toBe(200);
-    expect(sqsMock.calls()).toHaveLength(1);
-    expect(ecsMock.commandCalls(RunTaskCommand)).toHaveLength(0);
+    expect(sqsMock.calls()).toHaveLength(0);
+    delete process.env.BOT_USER_ID;
   });
 
   it("forwards message.channels events to SQS", async () => {

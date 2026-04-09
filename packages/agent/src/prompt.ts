@@ -28,10 +28,36 @@ Guidelines:
 - Keep responses under 3900 characters`;
 }
 
-export function buildSystemPrompt(override?: string, userTemplate?: string): string {
+export const NO_REPLY_SENTINEL = "__NO_REPLY__";
+
+const DISCRETION_INSTRUCTIONS = `
+---
+## Reply discretion
+
+You are reading messages from a Slack channel. You should only reply when your response would be genuinely useful. Use good judgment.
+
+**Reply** when:
+- The message is a question you can help answer
+- The message is a request to find, look up, or summarise information
+- The message is addressed to you or clearly invites your input
+
+**Do not reply** when:
+- The message is a statement, update, or social exchange between humans
+- The message is clearly addressed to someone else
+- The message is noise (reactions, off-topic chatter, logistics)
+
+If you decide not to reply, respond with exactly: ${NO_REPLY_SENTINEL}
+Do not explain. Do not add anything else. Just the sentinel on its own.`;
+
+export function buildSystemPrompt(
+  override?: string,
+  userTemplate?: string,
+  opts: { requiresDiscretion?: boolean } = {}
+): string {
   const base = override || defaultSystemPrompt();
   const template = userTemplate || DEFAULT_USER_PROMPT_TEMPLATE;
-  return `${base}
+  const discretion = opts.requiresDiscretion ? DISCRETION_INSTRUCTIONS : "";
+  return `${base}${discretion}
 ${getUserDocs()}
 
 ---
