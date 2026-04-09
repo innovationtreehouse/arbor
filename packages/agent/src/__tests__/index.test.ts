@@ -39,6 +39,7 @@ vi.mock("@arbor/logger", () => ({
 
 vi.mock("../slack.js", () => ({
   fetchThreadHistory: vi.fn().mockResolvedValue([]),
+  fetchChannelHistory: vi.fn().mockResolvedValue([]),
   postMessage: vi.fn().mockResolvedValue(undefined),
   postEphemeral: vi.fn().mockResolvedValue(undefined),
 }));
@@ -56,7 +57,7 @@ const sqsMock = mockClient(SQSClient);
 
 process.env.DATABASE_URL = "postgres://localhost/test";
 
-const { fetchThreadHistory, postMessage, postEphemeral } = await import("../slack.js");
+const { fetchThreadHistory, fetchChannelHistory, postMessage, postEphemeral } = await import("../slack.js");
 const { runAgent } = await import("../agent.js");
 const { buildPrompt, buildSystemPrompt } = await import("../prompt.js");
 const { processEvent } = await import("../index.js");
@@ -72,6 +73,7 @@ const baseEvent = {
 beforeEach(() => {
   sqsMock.reset();
   vi.mocked(fetchThreadHistory).mockClear();
+  vi.mocked(fetchChannelHistory).mockClear();
   vi.mocked(postMessage).mockClear();
   vi.mocked(postEphemeral).mockClear();
   vi.mocked(runAgent).mockClear();
@@ -100,8 +102,8 @@ describe("processEvent", () => {
     await processEvent(baseEvent);
 
     expect(fetchThreadHistory).toHaveBeenCalledWith("C_CHAN", "1.0");
-    expect(buildPrompt).toHaveBeenCalledWith(history, baseEvent.text, undefined);
-    expect(buildSystemPrompt).toHaveBeenCalled();
+    expect(buildPrompt).toHaveBeenCalledWith(history, baseEvent.text, undefined, []);
+    expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined);
     expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", undefined, undefined);
     expect(postMessage).toHaveBeenCalledWith("C_CHAN", "1.0", "Here is your answer.");
   });
@@ -119,6 +121,31 @@ describe("processEvent", () => {
     vi.mocked(runAgent).mockResolvedValueOnce("Custom agent answer");
     await processEvent(baseEvent);
     expect(postMessage).toHaveBeenCalledWith("C_CHAN", "1.0", "Custom agent answer");
+  });
+
+  it("fetches channel context for thread replies and passes it to buildPrompt", async () => {
+    const threadEvent = { ...baseEvent, is_thread: true };
+    const channelMsgs = [{ user: "U2", text: "some channel noise" }];
+    vi.mocked(fetchChannelHistory).mockResolvedValueOnce(channelMsgs);
+
+    await processEvent(threadEvent);
+
+    expect(fetchChannelHistory).toHaveBeenCalledWith("C_CHAN", 4);
+    expect(buildPrompt).toHaveBeenCalledWith(expect.any(Array), baseEvent.text, undefined, channelMsgs);
+  });
+
+  it("does not fetch channel context for non-thread events", async () => {
+    await processEvent({ ...baseEvent, is_thread: false });
+    expect(fetchChannelHistory).not.toHaveBeenCalled();
+    expect(buildPrompt).toHaveBeenCalledWith(expect.any(Array), baseEvent.text, undefined, []);
+  });
+
+  it("continues without channel context if fetchChannelHistory fails", async () => {
+    const threadEvent = { ...baseEvent, is_thread: true };
+    vi.mocked(fetchChannelHistory).mockRejectedValueOnce(new Error("no perms"));
+
+    await expect(processEvent(threadEvent)).resolves.not.toThrow();
+    expect(buildPrompt).toHaveBeenCalledWith(expect.any(Array), baseEvent.text, undefined, []);
   });
 
   it("propagates errors from fetchThreadHistory", async () => {

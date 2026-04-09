@@ -5,13 +5,16 @@ import {
 } from "@aws-sdk/client-sqs";
 import { PostgresConfigStore, PostgresAuditStore, PostgresUrlStore } from "@arbor/db";
 import { createAuditLogger } from "@arbor/logger";
-import { fetchThreadHistory, postMessage, postEphemeral } from "./slack.js";
+import { fetchChannelHistory, fetchThreadHistory, postMessage, postEphemeral } from "./slack.js";
 import { runAgent } from "./agent.js";
 import { buildPrompt, buildSystemPrompt } from "./prompt.js";
 import { BatchBuffer, type BatchEvent } from "./batch-buffer.js";
 import { processAdminCommand } from "./admin.js";
 
-export type SlackEvent = BatchEvent & { holdoff?: boolean };
+export type SlackEvent = BatchEvent & {
+  holdoff?: boolean;
+  is_thread?: boolean;
+};
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) throw new Error("DATABASE_URL is required");
@@ -25,6 +28,9 @@ const IDLE_TIMEOUT_MS =
   parseInt(process.env.IDLE_TIMEOUT ?? "15", 10) * 60 * 1000;
 const SQS_WAIT_SECONDS = 20;
 
+// Number of channel messages to include as compacted context in thread replies
+const THREAD_CHANNEL_CONTEXT = 4;
+
 export async function processEvent(event: SlackEvent): Promise<void> {
   await postEphemeral(event.channel, event.user, "_Searching…_");
   const [model, channelLimit, defaultLimit, systemOverride, userTemplate] = await Promise.all([
@@ -36,8 +42,16 @@ export async function processEvent(event: SlackEvent): Promise<void> {
   ]);
   const rawLimit = channelLimit ?? defaultLimit;
   const maxTokens = rawLimit !== undefined && parseInt(rawLimit, 10) > 0 ? parseInt(rawLimit, 10) : undefined;
+
+  // Fetch conversation history based on context type:
+  // - thread: full thread + up to THREAD_CHANNEL_CONTEXT recent channel messages
+  // - IM or channel (top-level): full conversation/channel history
   const history = await fetchThreadHistory(event.channel, event.thread_ts);
-  const prompt = buildPrompt(history, event.text, userTemplate || undefined);
+  const channelContext = event.is_thread
+    ? await fetchChannelHistory(event.channel, THREAD_CHANNEL_CONTEXT).catch(() => [])
+    : [];
+
+  const prompt = buildPrompt(history, event.text, userTemplate || undefined, channelContext);
   const systemPrompt = buildSystemPrompt(systemOverride || undefined, userTemplate || undefined);
   const start = Date.now();
   const response = await runAgent(prompt, systemPrompt, model, maxTokens);
