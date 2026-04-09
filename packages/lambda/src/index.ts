@@ -111,6 +111,8 @@ async function handleEvent(rawBody: string) {
   const isAppMention = ev?.type === "app_mention";
   const isChannelMessage = ev?.type === "message" && ev?.channel_type === "channel";
   const isDirectMessage = ev?.type === "message" && ev?.channel_type === "im";
+  const isThreadReply = isChannelMessage && !!ev?.thread_ts && ev.thread_ts !== ev.ts;
+  const isTopLevelChannelMessage = isChannelMessage && !isThreadReply;
 
   if (!isAppMention && !isChannelMessage && !isDirectMessage) {
     return { statusCode: 200, body: "" };
@@ -123,9 +125,10 @@ async function handleEvent(rawBody: string) {
     return { statusCode: 200, body: "" };
   }
 
-  // Channel message responses are opt-in — disabled by default.
-  // Admins enable via: /squirrel-admin channel-messages on
-  if (isChannelMessage) {
+  // Top-level channel messages are opt-in — disabled by default.
+  // Thread replies are always processed (with discretion).
+  // Admins enable top-level via: /squirrel-admin channel-messages on
+  if (isTopLevelChannelMessage) {
     const setting = await configStore.get("channel_messages").catch(() => undefined);
     if (setting !== "on") {
       return { statusCode: 200, body: "" };
@@ -143,7 +146,7 @@ async function handleEvent(rawBody: string) {
   // is_mention: agent must always reply, no discretion
   // requires_discretion: agent applies judgment about whether to reply
   const is_mention = isAppMention;
-  const requires_discretion = isChannelMessage || (!is_mention && !isDirectMessage);
+  const requires_discretion = isChannelMessage; // all channel messages: top-level and thread replies
 
   await sqsClient.send(
     new SendMessageCommand({
