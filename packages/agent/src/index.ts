@@ -72,7 +72,7 @@ export async function processEvent(event: SlackEvent): Promise<void> {
   const response = await runAgent(prompt, systemPrompt, model, maxTokens);
   const duration_ms = Date.now() - start;
 
-  if (response === NO_REPLY_SENTINEL) {
+  if (response.trim() === NO_REPLY_SENTINEL) {
     console.log(`[discretion] agent elected not to reply in channel ${event.channel}`);
     return;
   }
