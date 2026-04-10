@@ -178,7 +178,7 @@ jobs:
               'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                    .compatibilities, .registeredAt, .registeredBy)
                | .containerDefinitions[0].image = $img
-               | .containerDefinitions[0].entryPoint = null
+               | del(.containerDefinitions[0].entryPoint)
                | .runtimePlatform = {"cpuArchitecture": "ARM64", "operatingSystemFamily": "LINUX"}' \
           > /tmp/migrate-task-def.json
           TASK_DEF_ARN=$(aws ecs register-task-definition \
