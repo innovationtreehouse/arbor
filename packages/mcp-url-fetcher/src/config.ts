@@ -28,7 +28,11 @@ export class UrlConfig {
   }
 
   isAllowed(url: string): boolean {
-    return this.urls.has(url);
+    if (this.urls.has(url)) return true;
+    for (const key of this.urls.keys()) {
+      if (key.endsWith("*") && url.startsWith(key.slice(0, -1))) return true;
+    }
+    return false;
   }
 
   getAll(): UrlEntry[] {
@@ -36,6 +40,10 @@ export class UrlConfig {
   }
 
   getDescription(url: string): string {
-    return this.urls.get(url)?.description ?? "";
+    if (this.urls.has(url)) return this.urls.get(url)!.description;
+    for (const [key, entry] of this.urls.entries()) {
+      if (key.endsWith("*") && url.startsWith(key.slice(0, -1))) return entry.description;
+    }
+    return "";
   }
 }

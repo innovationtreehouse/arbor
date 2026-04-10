@@ -87,13 +87,15 @@ async function handleList(urlStore: UrlStore): Promise<string> {
 
 async function handleAdd(args: string[], userId: string, urlStore: UrlStore): Promise<string> {
   if (args.length < 2) return "Usage: `/squirrel-admin add <url> <description>`";
-  const url = args[0];
+  const rawUrl = args[0];
   const description = args.slice(1).join(" ");
-  if (!url.startsWith("https://")) return "URLs must start with `https://`.";
+  if (!rawUrl.startsWith("https://")) return "URLs must start with `https://`.";
   const currentCount = await urlStore.count();
   if (currentCount >= MAX_URL_COUNT) {
     return `Cannot add more URLs — limit of ${MAX_URL_COUNT} reached.`;
   }
+  // Always store as a wildcard prefix so all pages under the URL are accessible.
+  const url = rawUrl.endsWith("*") ? rawUrl : `${rawUrl}*`;
   await urlStore.upsert({ url, description, added_by: userId, enabled: true });
   return `✅ Added: *${url}*\n${description}`;
 }

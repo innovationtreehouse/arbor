@@ -10,6 +10,14 @@ const ENABLED_ITEM: UrlEntry = {
   added_at: "2026-01-01T00:00:00.000Z",
 };
 
+const WILDCARD_ITEM: UrlEntry = {
+  url: "https://wiki.example.com/*",
+  description: "Company Wiki",
+  enabled: true,
+  added_by: "U1",
+  added_at: "2026-01-01T00:00:00.000Z",
+};
+
 const DISABLED_ITEM: UrlEntry = {
   url: "https://old.example.com",
   description: "Old Docs",
@@ -76,6 +84,21 @@ describe("UrlConfig.isAllowed", () => {
     await config.load();
     expect(config.isAllowed("https://DOCS.EXAMPLE.COM")).toBe(false);
   });
+
+  it("allows a URL matching a wildcard prefix", async () => {
+    const store = makeStore({ listEnabled: vi.fn().mockResolvedValue([WILDCARD_ITEM]) });
+    const config = new UrlConfig(store);
+    await config.load();
+    expect(config.isAllowed("https://wiki.example.com/some/page")).toBe(true);
+    expect(config.isAllowed("https://wiki.example.com/")).toBe(true);
+  });
+
+  it("does not allow a URL from a different domain when only a wildcard prefix is stored", async () => {
+    const store = makeStore({ listEnabled: vi.fn().mockResolvedValue([WILDCARD_ITEM]) });
+    const config = new UrlConfig(store);
+    await config.load();
+    expect(config.isAllowed("https://other.example.com/page")).toBe(false);
+  });
 });
 
 describe("UrlConfig.getAll", () => {
@@ -103,6 +126,13 @@ describe("UrlConfig.getDescription", () => {
     const config = new UrlConfig(store);
     await config.load();
     expect(config.getDescription("https://unknown.com")).toBe("");
+  });
+
+  it("returns the description for a URL matching a wildcard prefix", async () => {
+    const store = makeStore({ listEnabled: vi.fn().mockResolvedValue([WILDCARD_ITEM]) });
+    const config = new UrlConfig(store);
+    await config.load();
+    expect(config.getDescription("https://wiki.example.com/some/page")).toBe("Company Wiki");
   });
 });
 

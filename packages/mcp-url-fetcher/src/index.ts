@@ -27,13 +27,13 @@ export function listToolsHandler() {
         name: "url_fetch",
         description:
           "Fetch the text content of a URL from the approved allowlist. " +
-          "Only URLs returned by url_list are permitted.",
+          "Any URL that starts with a prefix shown in url_list (entries ending with *) is permitted.",
         inputSchema: {
           type: "object",
           properties: {
             url: {
               type: "string",
-              description: "The exact URL to fetch (must be on the allowlist)",
+              description: "The URL to fetch (must match an allowlist entry or its wildcard prefix)",
             },
           },
           required: ["url"],
