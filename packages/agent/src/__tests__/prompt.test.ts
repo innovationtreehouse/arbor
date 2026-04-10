@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { buildPrompt, buildSystemPrompt, defaultSystemPrompt, DEFAULT_USER_PROMPT_TEMPLATE, NO_REPLY_SENTINEL } from "../prompt.js";
 import { getUserDocs } from "../user-docs.js";
 import type { SlackMessage } from "../prompt.js";
@@ -200,5 +200,26 @@ describe("buildPrompt", () => {
     const result = buildPrompt([{ user: "U1", text: "current" }], "current", undefined, channelContext);
     expect(result).toContain("Recent channel activity:");
     expect(result).toContain("bg noise");
+  });
+});
+
+describe("defaultSystemPrompt version line", () => {
+  afterEach(() => {
+    delete process.env.DEPLOY_TAG;
+    delete process.env.GIT_SHA;
+  });
+
+  it("includes DEPLOY_TAG in prompt when set", () => {
+    process.env.DEPLOY_TAG = "prod-20260410-abcdef12";
+    expect(defaultSystemPrompt()).toContain("prod-20260410-abcdef12");
+  });
+
+  it("falls back to GIT_SHA slice when only GIT_SHA is set", () => {
+    process.env.GIT_SHA = "abcdef1234567890abcdef1234567890abcdef12";
+    expect(defaultSystemPrompt()).toContain("abcdef12");
+  });
+
+  it("omits version line when neither env var is set", () => {
+    expect(defaultSystemPrompt()).not.toContain("running version");
   });
 });
