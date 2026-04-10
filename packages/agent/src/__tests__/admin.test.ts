@@ -113,9 +113,9 @@ describe("add", () => {
     vi.mocked(mockUrlStore.count).mockResolvedValueOnce(0);
     const text = await runCommand("add", ["https://docs.example.com", "Our", "API", "docs"], "U_ADMIN");
     expect(text).toContain("Added");
-    expect(text).toContain("https://docs.example.com");
+    expect(text).toContain("https://docs.example.com*");
     expect(mockUrlStore.upsert).toHaveBeenCalledWith({
-      url: "https://docs.example.com",
+      url: "https://docs.example.com*",
       description: "Our API docs",
       added_by: "U_ADMIN",
       enabled: true,
