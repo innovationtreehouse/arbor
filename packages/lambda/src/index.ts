@@ -103,6 +103,11 @@ async function handleEvent(rawBody: string) {
     return { statusCode: 200, body: "" };
   }
 
+  // Ignore emoji reactions — these are informational events, not messages
+  if (ev?.type === "reaction_added" || ev?.type === "reaction_removed") {
+    return { statusCode: 200, body: "" };
+  }
+
   // Ignore message edits, deletions, and other subtypes
   if (ev?.type === "message" && ev?.subtype) {
     return { statusCode: 200, body: "" };
@@ -120,7 +125,11 @@ async function handleEvent(rawBody: string) {
 
   // Skip channel messages that @mention the bot — app_mention handles those,
   // ensuring exactly one reply per mention with no discretion applied.
+  // BOT_USER_ID must be set or @mentions will be double-processed.
   const botUserId = process.env.BOT_USER_ID;
+  if (!botUserId) {
+    console.warn("[config] BOT_USER_ID is not set — @mentions in channels may trigger duplicate replies");
+  }
   if (isChannelMessage && botUserId && ev?.text?.includes(`<@${botUserId}>`)) {
     return { statusCode: 200, body: "" };
   }
