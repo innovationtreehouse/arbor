@@ -601,6 +601,47 @@ describe("channel-messages", () => {
 });
 
 // ---------------------------------------------------------------------------
+// version
+// ---------------------------------------------------------------------------
+
+describe("version", () => {
+  beforeEach(() => {
+    delete process.env.GIT_SHA;
+    delete process.env.DEPLOY_TAG;
+    delete process.env.DEPLOY_DIFF_URL;
+  });
+
+  it("reports unavailable when GIT_SHA not set", async () => {
+    const text = await runCommand("version");
+    expect(text).toContain("not available");
+  });
+
+  it("shows sha slice as version when only GIT_SHA is set", async () => {
+    process.env.GIT_SHA = "abcdef1234567890abcdef1234567890abcdef12";
+    const text = await runCommand("version");
+    expect(text).toContain("abcdef12");
+    expect(text).toContain("abcdef1234567890abcdef1234567890abcdef12");
+    expect(text).not.toContain("Changes since");
+  });
+
+  it("shows DEPLOY_TAG as version when set", async () => {
+    process.env.GIT_SHA = "abcdef1234567890abcdef1234567890abcdef12";
+    process.env.DEPLOY_TAG = "prod-20260410-abcdef12";
+    const text = await runCommand("version");
+    expect(text).toContain("prod-20260410-abcdef12");
+  });
+
+  it("includes diff URL when DEPLOY_DIFF_URL is set", async () => {
+    process.env.GIT_SHA = "abcdef1234567890abcdef1234567890abcdef12";
+    process.env.DEPLOY_TAG = "prod-20260410-abcdef12";
+    process.env.DEPLOY_DIFF_URL = "https://github.com/org/repo/compare/prev...abcdef12";
+    const text = await runCommand("version");
+    expect(text).toContain("Changes since last promotion");
+    expect(text).toContain("https://github.com/org/repo/compare/prev...abcdef12");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // unknown subcommand + error handling
 // ---------------------------------------------------------------------------
 
