@@ -57,6 +57,9 @@ export async function processAdminCommand(cmd: AdminCommand, stores: Stores): Pr
       case "channel-messages":
         text = await handleChannelMessages(args, configStore);
         break;
+      case "version":
+        text = handleVersion();
+        break;
       default:
         text = `Unknown subcommand: \`${subcommand}\`. Try \`/squirrel-admin help\`.`;
     }
@@ -304,6 +307,25 @@ async function handlePrompt(args: string[], configStore: ConfigStore): Promise<s
   }
 
   return `Unknown prompt subcommand: \`${subcmd}\`. Available: \`show [system|user]\`, \`set system|user <text>\`, \`reset [system|user]\`.`;
+}
+
+function handleVersion(): string {
+  const sha = process.env.GIT_SHA;
+  const tag = process.env.DEPLOY_TAG;
+  const diffUrl = process.env.DEPLOY_DIFF_URL;
+
+  if (!sha) {
+    return "Version information is not available (env not set at deployment time).";
+  }
+
+  const lines = [
+    `*Version:* \`${tag ?? sha.slice(0, 8)}\``,
+    `*Commit:* \`${sha}\``,
+  ];
+  if (diffUrl) {
+    lines.push(`*Changes since last promotion:* ${diffUrl}`);
+  }
+  return lines.join("\n");
 }
 
 async function handleChannelMessages(args: string[], configStore: ConfigStore): Promise<string> {

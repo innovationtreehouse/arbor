@@ -9,7 +9,7 @@ on:
 
 permissions:
   id-token: write      # required for OIDC → AWS
-  contents: read       # required for checkout and git log
+  contents: write      # required for checkout, git log, and pushing release tags
   actions: none
   checks: none
   issues: none
@@ -42,6 +42,15 @@ jobs:
             echo "Invalid SHA: must be exactly 40 lowercase hex characters"
             exit 1
           fi
+
+      - name: Generate release tag
+        id: release-tag
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          TAG="prod-$(date -u +%Y%m%d)-${SHA:0:8}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG"
 
       - uses: actions/checkout@v4
         with:
@@ -163,16 +172,36 @@ jobs:
         id: register-task-def-prod
         env:
           SHA: ${{ inputs.sha }}
+          DEPLOY_TAG: ${{ steps.release-tag.outputs.tag }}
           ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           REGION: ${{ secrets.AWS_REGION }}
+          REPO: ${{ github.repository }}
         run: |
+          PREV_SHA=$(aws ssm get-parameter \
+            --name "/arbor/deployed/prod/sha" \
+            --query Parameter.Value --output text 2>/dev/null || echo "")
+          DIFF_URL=""
+          if [ -n "$PREV_SHA" ] && [ "$PREV_SHA" != "$SHA" ]; then
+            DIFF_URL="https://github.com/$REPO/compare/${PREV_SHA}...${SHA}"
+          fi
+
           aws ecs describe-task-definition \
             --task-definition arbor-agent-prod \
             --query taskDefinition \
           | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:$SHA" \
+               --arg sha "$SHA" \
+               --arg tag "$DEPLOY_TAG" \
+               --arg diff_url "$DIFF_URL" \
               'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                    .compatibilities, .registeredAt, .registeredBy)
                | .containerDefinitions[0].image = $img
+               | .containerDefinitions[0].environment = (
+                   (.containerDefinitions[0].environment // [])
+                   | map(select(.name != "GIT_SHA" and .name != "DEPLOY_TAG" and .name != "DEPLOY_DIFF_URL"))
+                   + [{"name": "GIT_SHA", "value": $sha},
+                      {"name": "DEPLOY_TAG", "value": $tag},
+                      {"name": "DEPLOY_DIFF_URL", "value": $diff_url}]
+                 )
                | .runtimePlatform = {"cpuArchitecture": "ARM64", "operatingSystemFamily": "LINUX"}' \
           > /tmp/task-def.json
           TASK_DEF_ARN=$(aws ecs register-task-definition \
@@ -226,6 +255,16 @@ jobs:
           fi
 
           echo "Smoke tests passed."
+
+      - name: Tag release in git
+        if: success()
+        env:
+          TAG: ${{ steps.release-tag.outputs.tag }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          git tag "$TAG" "$SHA"
+          git push origin "$TAG"
+          echo "Tagged $SHA as $TAG"
 
       - name: Notify merged PRs and record deployed SHA
         if: success()
