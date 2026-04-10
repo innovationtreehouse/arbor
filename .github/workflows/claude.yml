@@ -53,7 +53,7 @@ jobs:
 
       - name: Run Claude
         if: steps.prompt.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@v1.0.89
+        uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
@@ -107,7 +107,7 @@ jobs:
 
       - name: Run Claude
         if: steps.prompt.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@v1.0.89
+        uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
@@ -193,7 +193,7 @@ jobs:
       - name: Run Claude
         id: claude
         if: steps.skip-check.outputs.skip != 'true' && steps.prompt.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@v1.0.89
+        uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
@@ -291,7 +291,7 @@ jobs:
 
       - name: Run Claude
         if: steps.prompt.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@v1.0.89
+        uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
@@ -351,7 +351,7 @@ jobs:
 
       - name: Run Claude
         if: steps.prompt.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@v1.0.89
+        uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
