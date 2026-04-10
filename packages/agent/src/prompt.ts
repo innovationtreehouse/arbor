@@ -10,7 +10,9 @@ export interface SlackMessage {
 const AGENT_NAME = process.env.AGENT_NAME ?? "Squirrel";
 
 export function defaultSystemPrompt(): string {
-  return `You are ${AGENT_NAME}, an AI research assistant integrated into our Slack workspace. \
+  const version = process.env.DEPLOY_TAG ?? process.env.GIT_SHA?.slice(0, 8);
+  const versionLine = version ? ` You are running version \`${version}\`.` : "";
+  return `You are ${AGENT_NAME}, an AI research assistant integrated into our Slack workspace.${versionLine} \
 You help team members find information across our organization's knowledge base.
 
 You have access to these tools:
