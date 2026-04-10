@@ -94,6 +94,19 @@ jobs:
             -t $REGISTRY/arbor-agent:dev \
             -f packages/agent/Dockerfile .
 
+      - name: Build and push migrate image
+        if: env.SKIP_DEPLOY != 'true'
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          docker buildx build --platform linux/arm64 \
+            --target migrate \
+            --push \
+            -t $REGISTRY/arbor-agent:migrate-$SHA \
+            -t $REGISTRY/arbor-agent:migrate-dev \
+            -f packages/agent/Dockerfile .
+
       - name: Verify image is pullable (dev)
         if: env.SKIP_DEPLOY != 'true'
         env:
@@ -150,6 +163,29 @@ jobs:
               --no-overwrite
           fi
 
+      - name: Register migrate task definition (dev)
+        if: env.SKIP_DEPLOY != 'true'
+        id: register-migrate-task-def-dev
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition arbor-migrate-dev \
+            --query taskDefinition \
+          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:migrate-$SHA" \
+              'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                   .compatibilities, .registeredAt, .registeredBy)
+               | .containerDefinitions[0].image = $img
+               | .containerDefinitions[0].entryPoint = null
+               | .runtimePlatform = {"cpuArchitecture": "ARM64", "operatingSystemFamily": "LINUX"}' \
+          > /tmp/migrate-task-def.json
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/migrate-task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "task_def_arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
+
       - name: Run database migrations (dev)
         # Runs drizzle-kit migrate in a short-lived ECS task inside the VPC,
         # so the DB does not need to be reachable from GitHub Actions runners.
@@ -163,7 +199,7 @@ jobs:
         run: |
           TASK_ARN=$(aws ecs run-task \
             --cluster arbor-dev \
-            --task-definition arbor-migrate-dev \
+            --task-definition "${{ steps.register-migrate-task-def-dev.outputs.task_def_arn }}" \
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS_DEV }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID_DEV }}],assignPublicIp=DISABLED}" \
             --overrides "{\"containerOverrides\":[{\"name\":\"arbor-migrate\",\"environment\":[{\"name\":\"DATABASE_URL\",\"value\":\"${{ secrets.DATABASE_URL_DEV }}\"}]}]}" \
