@@ -98,6 +98,9 @@ jobs:
           docker pull $REGISTRY/arbor-agent:$SHA
           docker tag  $REGISTRY/arbor-agent:$SHA $REGISTRY/arbor-agent:prod
           docker push $REGISTRY/arbor-agent:prod
+          docker pull $REGISTRY/arbor-agent:migrate-$SHA
+          docker tag  $REGISTRY/arbor-agent:migrate-$SHA $REGISTRY/arbor-agent:migrate-prod
+          docker push $REGISTRY/arbor-agent:migrate-prod
 
       - name: Download Lambda zip from S3
         env:
@@ -118,6 +121,28 @@ jobs:
           fi
           echo "Checksum verified: $ACTUAL"
 
+      - name: Register migrate task definition (prod)
+        id: register-migrate-task-def-prod
+        env:
+          SHA: ${{ inputs.sha }}
+          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition arbor-migrate-prod \
+            --query taskDefinition \
+          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:migrate-$SHA" \
+              'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                   .compatibilities, .registeredAt, .registeredBy)
+               | .containerDefinitions[0].image = $img
+               | .containerDefinitions[0].entryPoint = null
+               | .runtimePlatform = {"cpuArchitecture": "ARM64", "operatingSystemFamily": "LINUX"}' \
+          > /tmp/migrate-task-def.json
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/migrate-task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "task_def_arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
+
       - name: Run database migrations (prod)
         # Runs drizzle-kit migrate in a short-lived ECS task inside the VPC,
         # so the DB does not need to be reachable from GitHub Actions runners.
@@ -130,7 +155,7 @@ jobs:
         run: |
           TASK_ARN=$(aws ecs run-task \
             --cluster arbor-prod \
-            --task-definition arbor-migrate-prod \
+            --task-definition "${{ steps.register-migrate-task-def-prod.outputs.task_def_arn }}" \
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS_PROD }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID_PROD }}],assignPublicIp=DISABLED}" \
             --overrides "{\"containerOverrides\":[{\"name\":\"arbor-migrate\",\"environment\":[{\"name\":\"DATABASE_URL\",\"value\":\"${{ secrets.DATABASE_URL_PROD }}\"}]}]}" \
