@@ -89,7 +89,7 @@ async function runAgentOnce(
         "mcp__gdrive__getFolderInfo",
         "mcp__gdrive__readDocument",
         "mcp__gdrive__downloadFile",
-        // GitHub — read only
+        // GitHub — read
         "mcp__github__search_repositories",
         "mcp__github__search_code",
         "mcp__github__search_issues",
@@ -101,6 +101,10 @@ async function runAgentOnce(
         "mcp__github__get_pull_request",
         "mcp__github__list_pull_requests",
         "mcp__github__get_pull_request_files",
+        // GitHub — write
+        "mcp__github__create_issue",
+        "mcp__github__add_issue_comment",
+        "mcp__github__create_pull_request_review",
       ],
       ...(maxTokens !== undefined ? { maxTokens } : {}),
       mcpServers: {
