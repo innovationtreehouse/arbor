@@ -40,6 +40,7 @@ vi.mock("@arbor/logger", () => ({
 vi.mock("../slack.js", () => ({
   fetchThreadHistory: vi.fn().mockResolvedValue([]),
   fetchChannelHistory: vi.fn().mockResolvedValue([]),
+  fetchSlackImages: vi.fn().mockResolvedValue([]),
   postMessage: vi.fn().mockResolvedValue(undefined),
   postEphemeral: vi.fn().mockResolvedValue(undefined),
 }));
@@ -57,7 +58,7 @@ const sqsMock = mockClient(SQSClient);
 
 process.env.DATABASE_URL = "postgres://localhost/test";
 
-const { fetchThreadHistory, fetchChannelHistory, postMessage, postEphemeral } = await import("../slack.js");
+const { fetchThreadHistory, fetchChannelHistory, fetchSlackImages, postMessage, postEphemeral } = await import("../slack.js");
 const { runAgent } = await import("../agent.js");
 const { buildPrompt, buildSystemPrompt } = await import("../prompt.js");
 const { processEvent } = await import("../index.js");
@@ -109,7 +110,7 @@ describe("processEvent", () => {
     expect(fetchThreadHistory).toHaveBeenCalledWith("C_CHAN", "1.0");
     expect(buildPrompt).toHaveBeenCalledWith(history, baseEvent.text, undefined, []);
     expect(buildSystemPrompt).toHaveBeenCalledWith(undefined, undefined, { requiresDiscretion: false });
-    expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", undefined, undefined);
+    expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", undefined, undefined, []);
     expect(postMessage).toHaveBeenCalledWith("C_CHAN", "1.0", "Here is your answer.");
   });
 
@@ -131,7 +132,7 @@ describe("processEvent", () => {
     await processEvent(baseEvent);
 
     expect(mockConfigStore.get).toHaveBeenCalledWith("model");
-    expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", "claude-opus-4-6", undefined);
+    expect(runAgent).toHaveBeenCalledWith("built prompt", "system prompt", "claude-opus-4-6", undefined, []);
   });
 
   it("passes the agent response to postMessage", async () => {
@@ -217,6 +218,7 @@ describe("processEvent", () => {
       expect.any(String),
       undefined,
       2048,
+      [],
     );
   });
 
@@ -233,6 +235,7 @@ describe("processEvent", () => {
       expect.any(String),
       undefined,
       4096,
+      [],
     );
   });
 
@@ -250,6 +253,7 @@ describe("processEvent", () => {
       expect.any(String),
       undefined,
       1024,
+      [],
     );
   });
 
@@ -263,6 +267,7 @@ describe("processEvent", () => {
       expect.any(String),
       undefined,
       undefined,
+      [],
     );
   });
 
@@ -279,6 +284,7 @@ describe("processEvent", () => {
       expect.any(String),
       undefined,
       undefined,
+      [],
     );
   });
 
@@ -295,6 +301,45 @@ describe("processEvent", () => {
       expect.any(String),
       undefined,
       undefined,
+      [],
+    );
+  });
+
+  it("fetches images and passes them to runAgent when event has files", async () => {
+    const imageData = [{ mediaType: "image/png" as const, data: "base64data" }];
+    vi.mocked(fetchSlackImages).mockResolvedValueOnce(imageData);
+
+    await processEvent({
+      ...baseEvent,
+      files: [{ url_private: "https://files.slack.com/img.png", mimetype: "image/png" }],
+    });
+
+    expect(fetchSlackImages).toHaveBeenCalledWith([
+      { url_private: "https://files.slack.com/img.png", mimetype: "image/png" },
+    ]);
+    expect(runAgent).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      undefined,
+      imageData,
+    );
+  });
+
+  it("passes empty images when fetchSlackImages fails", async () => {
+    vi.mocked(fetchSlackImages).mockRejectedValueOnce(new Error("network error"));
+
+    await processEvent({
+      ...baseEvent,
+      files: [{ url_private: "https://files.slack.com/img.png", mimetype: "image/png" }],
+    });
+
+    expect(runAgent).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      undefined,
+      [],
     );
   });
 });
