@@ -5,7 +5,8 @@ import {
 } from "@aws-sdk/client-sqs";
 import { PostgresConfigStore, PostgresAuditStore, PostgresUrlStore } from "@arbor/db";
 import { createAuditLogger } from "@arbor/logger";
-import { fetchChannelHistory, fetchThreadHistory, postMessage, postEphemeral } from "./slack.js";
+import { fetchChannelHistory, fetchThreadHistory, fetchSlackImages, postMessage, postEphemeral } from "./slack.js";
+import type { SlackFile } from "./slack.js";
 import { runAgent } from "./agent.js";
 import { buildPrompt, buildSystemPrompt } from "./prompt.js";
 import { BatchBuffer, type BatchEvent } from "./batch-buffer.js";
@@ -19,6 +20,7 @@ export type SlackEvent = BatchEvent & {
   is_mention?: boolean;
   is_thread?: boolean;
   requires_discretion?: boolean;
+  files?: SlackFile[];
 };
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -68,8 +70,13 @@ export async function processEvent(event: SlackEvent): Promise<void> {
     userTemplate || undefined,
     { requiresDiscretion: event.requires_discretion ?? false }
   );
+
+  const images = event.files?.length
+    ? await fetchSlackImages(event.files).catch(() => [])
+    : [];
+
   const start = Date.now();
-  const response = await runAgent(prompt, systemPrompt, model, maxTokens);
+  const response = await runAgent(prompt, systemPrompt, model, maxTokens, images);
   const duration_ms = Date.now() - start;
 
   if (response.trim() === NO_REPLY_SENTINEL) {

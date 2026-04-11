@@ -68,3 +68,62 @@ export async function postEphemeral(
     text,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Image fetching
+// ---------------------------------------------------------------------------
+
+export interface SlackFile {
+  url_private: string;
+  mimetype: string;
+  name?: string;
+}
+
+export interface ImageContent {
+  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  data: string; // base64
+}
+
+const SUPPORTED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
+
+// 4MB limit — well under Claude's 5MB per image cap
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+export async function fetchSlackImages(
+  files: SlackFile[]
+): Promise<ImageContent[]> {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token) return [];
+
+  const results: ImageContent[] = [];
+  for (const file of files) {
+    if (!SUPPORTED_IMAGE_TYPES.has(file.mimetype)) continue;
+    try {
+      const res = await fetch(file.url_private, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) {
+        console.warn(`[images] Failed to fetch ${file.name ?? file.url_private}: HTTP ${res.status}`);
+        continue;
+      }
+      const buffer = await res.arrayBuffer();
+      if (buffer.byteLength > MAX_IMAGE_BYTES) {
+        console.warn(`[images] Skipping ${file.name ?? file.url_private}: ${buffer.byteLength} bytes exceeds ${MAX_IMAGE_BYTES} limit`);
+        continue;
+      }
+      results.push({
+        mediaType: file.mimetype as ImageContent["mediaType"],
+        data: Buffer.from(buffer).toString("base64"),
+      });
+    } catch (err) {
+      console.warn(`[images] Error fetching ${file.name ?? file.url_private}:`, err);
+    }
+  }
+  return results;
+}

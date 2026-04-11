@@ -1,11 +1,14 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import * as path from "path";
+import { randomUUID } from "crypto";
+import type { ImageContent } from "./slack.js";
 
 export async function runAgent(
   prompt: string,
   systemPrompt: string,
   model?: string,
   maxTokens?: number,
+  images?: ImageContent[],
 ): Promise<string> {
   const maxRetries = parseInt(process.env.MAX_MCP_RETRIES ?? "2", 10);
   let lastError: Error | undefined;
@@ -21,7 +24,7 @@ export async function runAgent(
     }
 
     try {
-      return await runAgentOnce(prompt, systemPrompt, model, maxTokens);
+      return await runAgentOnce(prompt, systemPrompt, model, maxTokens, images);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (!isTransientError(lastError)) throw lastError;
@@ -46,11 +49,39 @@ function isTransientError(err: Error): boolean {
   );
 }
 
+// Build a multi-modal prompt as an AsyncIterable<SDKUserMessage> when images
+// are present. The SDK accepts this form for rich message content.
+async function* buildImagePrompt(
+  text: string,
+  images: ImageContent[]
+) {
+  yield {
+    type: "user" as const,
+    message: {
+      role: "user" as const,
+      content: [
+        ...images.map((img) => ({
+          type: "image" as const,
+          source: {
+            type: "base64" as const,
+            media_type: img.mediaType,
+            data: img.data,
+          },
+        })),
+        { type: "text" as const, text },
+      ],
+    },
+    parent_tool_use_id: null,
+    session_id: randomUUID(),
+  };
+}
+
 async function runAgentOnce(
   prompt: string,
   systemPrompt: string,
   model?: string,
   maxTokens?: number,
+  images?: ImageContent[],
 ): Promise<string> {
   const urlFetcherPath = path.resolve(
     __dirname,
@@ -66,12 +97,17 @@ async function runAgentOnce(
     gdrive: !!gdriveProxyUrl,
     github: !!process.env.GITHUB_TOKEN,
     urlFetcher: true,
+    images: images?.length ?? 0,
   }));
+
+  const sdkPrompt = images?.length
+    ? buildImagePrompt(prompt, images)
+    : prompt;
 
   let result = "";
 
   for await (const message of query({
-    prompt,
+    prompt: sdkPrompt,
     options: {
       model: model ?? process.env.MODEL ?? "claude-opus-4-6",
       systemPrompt,

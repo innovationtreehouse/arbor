@@ -157,6 +157,11 @@ async function handleEvent(rawBody: string) {
   const is_mention = isAppMention;
   const requires_discretion = isChannelMessage; // all channel messages: top-level and thread replies
 
+  // Extract image file attachments for vision processing
+  const imageFiles = ((ev.files ?? []) as Array<Record<string, unknown>>)
+    .filter((f) => typeof f.mimetype === "string" && (f.mimetype as string).startsWith("image/"))
+    .map((f) => ({ url_private: f.url_private, mimetype: f.mimetype, name: f.name }));
+
   await sqsClient.send(
     new SendMessageCommand({
       QueueUrl: process.env.SQS_QUEUE_URL!,
@@ -171,6 +176,7 @@ async function handleEvent(rawBody: string) {
         holdoff,
         is_mention,
         requires_discretion,
+        ...(imageFiles.length > 0 ? { files: imageFiles } : {}),
       }),
     })
   );
