@@ -115,7 +115,7 @@ async function runAgentOnce(
         // URL fetcher — read allowed URLs
         "mcp__urlFetcher__url_fetch",
         "mcp__urlFetcher__url_list",
-        // Google Drive — read only
+        // Google Drive — read
         "mcp__gdrive__listDocuments",
         "mcp__gdrive__searchDocuments",
         "mcp__gdrive__listDriveFiles",
@@ -125,6 +125,10 @@ async function runAgentOnce(
         "mcp__gdrive__getFolderInfo",
         "mcp__gdrive__readDocument",
         "mcp__gdrive__downloadFile",
+        // Google Drive — write
+        "mcp__gdrive__createDocument",
+        "mcp__gdrive__appendText",
+        "mcp__gdrive__insertText",
         // GitHub — read
         "mcp__github__search_repositories",
         "mcp__github__search_code",

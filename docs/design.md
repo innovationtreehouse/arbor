@@ -511,7 +511,7 @@ Rather than a general search capability, Squirrel fetches specific known URLs. T
 
 - Verify `X-Slack-Signature` on every inbound webhook in the Lambda handler; reject without processing if invalid
 - All secrets in AWS Secrets Manager or SSM; never in code, Docker images, or env files
-- Google service account scoped to `drive.readonly`; only folders explicitly shared with it are accessible
+- Google service account scoped to `drive` (read/write); only folders explicitly shared with it are accessible
 - `GITHUB_TOKEN` uses fine-grained PAT limited to specific repositories and `contents:read` + `issues:read` + `pull_requests:read` scopes
 - `url-fetcher` MCP server rejects any URL not on the admin-managed allowlist — the model cannot instruct it to fetch arbitrary URLs
 - Slack responses truncated to ≤4,000 characters before posting (Slack API limit)

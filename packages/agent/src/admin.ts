@@ -357,7 +357,7 @@ async function checkGoogleDrive(creds: {
     const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
     const payload = Buffer.from(JSON.stringify({
       iss: creds.client_email,
-      scope: "https://www.googleapis.com/auth/drive.readonly",
+      scope: "https://www.googleapis.com/auth/drive",
       aud: "https://oauth2.googleapis.com/token",
       exp: now + 3600,
       iat: now,
