@@ -33,7 +33,7 @@ The agent container also runs the `mcp-url-fetcher` MCP server in-process, which
 | `ANTHROPIC_API_KEY` | Yes | — | Anthropic API key passed to the Claude Agent SDK |
 | `SLACK_BOT_TOKEN` | Yes | — | Slack bot OAuth token (`xoxb-…`) used to post replies and fetch thread history |
 | `DATABASE_URL` | Yes | — | Same PostgreSQL connection string as Lambda |
-| `GOOGLE_CREDENTIALS` | Yes | — | Google service account JSON as a single-line string; grants Drive API access |
+| `GOOGLE_CREDENTIALS` | Yes | — | Google service account JSON as a single-line string; grants Drive API read/write access |
 | `GITHUB_TOKEN` | Yes | — | GitHub PAT for the GitHub MCP server; token scopes determine accessible repositories |
 | `SQS_QUEUE_URL` | No | — | Same SQS queue URL as Lambda |
 | `AWS_REGION` | No | — | AWS region (e.g. `us-east-1`) |
