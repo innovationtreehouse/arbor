@@ -62,7 +62,7 @@ jobs:
         if: steps.prompt.outputs.skip != 'true'
         uses: anthropics/claude-code-action@v1
         env:
-    BUN_CONFIG_NO_TSCONFIG: "true"
+          BUN_CONFIG_NO_TSCONFIG: "true"
         with:
           custom_bun_path: ~/.bun/bin/bun
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
