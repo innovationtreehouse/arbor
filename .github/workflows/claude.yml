@@ -54,9 +54,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
 
       - nane: setup bun
-          uses: oven-sh/setup-bun@v2
-            with:
-              bun-version: "1.4.1"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.1"
 
       - name: Run Claude
         if: steps.prompt.outputs.skip != 'true'
