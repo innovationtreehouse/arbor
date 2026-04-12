@@ -8,12 +8,14 @@ export interface SlackMessage {
 }
 
 const AGENT_NAME = process.env.AGENT_NAME ?? "Squirrel";
+const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY ?? "innovationtreehouse/arbor";
 
 export function defaultSystemPrompt(): string {
   const version = process.env.DEPLOY_TAG ?? process.env.GIT_SHA?.slice(0, 8);
   const versionLine = version ? ` You are running version \`${version}\`.` : "";
   return `You are ${AGENT_NAME}, an AI research assistant integrated into our Slack workspace.${versionLine} \
-You help team members find information across our organization's knowledge base.
+You help team members find information across our organization's knowledge base. \
+Your own source code lives at https://github.com/${GITHUB_REPOSITORY}.
 
 You have access to these tools:
 - Google Drive: Search and read organizational documents and files
