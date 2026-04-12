@@ -91,10 +91,31 @@ describe("runAgent", () => {
     process.env.GDRIVE_MCP_PROXY_URL = "http://127.0.0.1:8123/mcp";
     process.env.GITHUB_TOKEN = "ghp_test";
 
+    try {
+      await runAgent("prompt", "system");
+
+      const { mcpServers } = vi.mocked(query).mock.calls[0][0].options ?? {};
+      expect(mcpServers).toHaveProperty("gdrive");
+      expect(mcpServers).toHaveProperty("github");
+      expect(mcpServers).toHaveProperty("urlFetcher");
+    } finally {
+      delete process.env.GDRIVE_MCP_PROXY_URL;
+      delete process.env.GITHUB_TOKEN;
+    }
+  });
+
+  it("omits gdrive from MCP servers when GDRIVE_MCP_PROXY_URL is not set", async () => {
+    delete process.env.GDRIVE_MCP_PROXY_URL;
+    vi.mocked(query).mockReturnValue(
+      (async function* () {
+        yield { result: "ok" };
+      })()
+    );
+
     await runAgent("prompt", "system");
 
     const { mcpServers } = vi.mocked(query).mock.calls[0][0].options ?? {};
-    expect(mcpServers).toHaveProperty("gdrive");
+    expect(mcpServers).not.toHaveProperty("gdrive");
     expect(mcpServers).toHaveProperty("github");
     expect(mcpServers).toHaveProperty("urlFetcher");
   });
