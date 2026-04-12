@@ -45,8 +45,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Work around Bun tsconfig crash
-        run: find "$GITHUB_WORKSPACE/../_actions/anthropics/" -name "tsconfig.json" -delete 2>/dev/null || true
 
 
       - name: Build prompt
@@ -55,10 +53,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
 
+      - nane: setup bun
+          uses: oven-sh/setup-bun@v2
+            with:
+              bun-version: "1.4.1"
+
       - name: Run Claude
         if: steps.prompt.outputs.skip != 'true'
         uses: anthropics/claude-code-action@v1
+        env:
+    BUN_CONFIG_NO_TSCONFIG: "true"
         with:
+          custom_bun_path: ~/.bun/bin/bun
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
           prompt:     ${{ steps.prompt.outputs.prompt }}
