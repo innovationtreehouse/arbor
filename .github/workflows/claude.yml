@@ -45,6 +45,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Work around Bun tsconfig crash
+        run: find "$GITHUB_WORKSPACE/../_actions/anthropics/" -name "tsconfig.json" -delete 2>/dev/null || true
+
+
       - name: Build prompt
         id: prompt
         run: node scripts/build-claude-prompt.js
