@@ -45,8 +45,6 @@ jobs:
         with:
           fetch-depth: 0
 
-
-
       - name: Build prompt
         id: prompt
         run: node scripts/build-claude-prompt.js
@@ -113,10 +111,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
 
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.12"
+
       - name: Run Claude
         if: steps.prompt.outputs.skip != 'true'
         uses: anthropics/claude-code-action@v1
         with:
+          custom_bun_path: /home/runner/.bun/bin/bun
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
           prompt:     ${{ steps.prompt.outputs.prompt }}
@@ -126,7 +130,7 @@ jobs:
                 "allow": [
                   "Bash(git fetch *)", "Bash(git checkout *)",
                   "Bash(git add *)", "Bash(git commit *)", "Bash(git push *)",
-                  "Bash(gh issue comment *)","Edit()", "Write()","Grep()","Glob()"
+                  "Bash(gh issue comment *)", "Edit(**)", "Write(**)","Grep()","Glob()"
                 ],
                 "deny": [
                   "Edit(.github/**)", "Write(.github/**)"
@@ -198,11 +202,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
 
+      - name: setup bun
+        if: steps.skip-check.outputs.skip != 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.12"
+
       - name: Run Claude
         id: claude
         if: steps.skip-check.outputs.skip != 'true' && steps.prompt.outputs.skip != 'true'
         uses: anthropics/claude-code-action@v1
         with:
+          custom_bun_path: /home/runner/.bun/bin/bun
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
           prompt:            ${{ steps.prompt.outputs.prompt }}
@@ -297,10 +308,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
 
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.12"
+
       - name: Run Claude
         if: steps.prompt.outputs.skip != 'true'
         uses: anthropics/claude-code-action@v1
         with:
+          custom_bun_path: /home/runner/.bun/bin/bun
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
           prompt:            ${{ steps.prompt.outputs.prompt }}
@@ -357,10 +374,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
 
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.12"
+
       - name: Run Claude
         if: steps.prompt.outputs.skip != 'true'
         uses: anthropics/claude-code-action@v1
         with:
+          custom_bun_path: /home/runner/.bun/bin/bun
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_TOKEN }}
           github_token:      ${{ secrets.AGENT_TOKEN }}
           prompt:     ${{ steps.prompt.outputs.prompt }}
@@ -370,7 +393,7 @@ jobs:
                 "allow": [
                   "Bash(git fetch *)", "Bash(git checkout *)",
                   "Bash(git add *)", "Bash(git commit *)", "Bash(git push *)",
-                  "Bash(gh pr review *)", "Bash(gh pr comment *)","Grep()","Glob()"
+                  "Bash(gh pr review *)", "Bash(gh pr comment *)", "Edit(**)", "Write(**)","Grep()","Glob()"
                 ],
                 "deny": [
                   "Edit(.github/**)", "Write(.github/**)"
