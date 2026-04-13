@@ -127,6 +127,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           REPO: ${{ github.repository }}
         run: |
           MARKER="<!-- claude-label-reminder -->"
@@ -137,8 +138,10 @@ jobs:
           has_label=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
             --json labels \
             --jq '[.labels[].name] | contains(["claude"]) | if . then 1 else 0 end')
+          merged_count=$(gh pr list --repo "$REPO" --state merged --author "$PR_AUTHOR" \
+            --limit 3 --json number | jq 'length')
 
-          if [ "$already_posted" -eq 0 ] && [ "$has_label" -eq 0 ]; then
+          if [ "$already_posted" -eq 0 ] && [ "$has_label" -eq 0 ] && [ "$merged_count" -lt 3 ]; then
             gh pr comment "$PR_NUMBER" --repo "$REPO" --body \
               "${MARKER}
           Add the \`claude\` label to this PR to request an automated code review. The \`claude/pr-review\` status check will not pass until the label is added and the review has run."
