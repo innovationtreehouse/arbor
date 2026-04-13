@@ -283,23 +283,10 @@ describe("/slack/events", () => {
     expect(sqsMock.calls()).toHaveLength(1);
   });
 
-  it("drops thread replies when channel_messages setting is not 'on'", async () => {
+  it("forwards thread replies with requires_discretion:true regardless of channel_messages setting", async () => {
     ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
     sqsMock.on(SendMessageCommand).resolves({});
-    // channel_messages is off (default) — thread replies are now also gated
-
-    const event = { type: "message", channel_type: "channel", channel: "C1", ts: "7.0", thread_ts: "1.0", text: "following up on this", user: "U1" };
-    const body = JSON.stringify({ type: "event_callback", event });
-
-    const res = await handler(makeEvent({ body }), {} as any, {} as any);
-    expect(res?.statusCode).toBe(200);
-    expect(sqsMock.calls()).toHaveLength(0);
-  });
-
-  it("forwards thread replies with requires_discretion:true when channel_messages is 'on'", async () => {
-    ecsMock.on(ListTasksCommand).resolves({ taskArns: ["arn:task:1"] });
-    sqsMock.on(SendMessageCommand).resolves({});
-    vi.mocked(mockConfigStore.get).mockResolvedValueOnce("on"); // channel_messages=on
+    // channel_messages is off (default) — but thread replies always get through
 
     const event = { type: "message", channel_type: "channel", channel: "C1", ts: "7.0", thread_ts: "1.0", text: "following up on this", user: "U1" };
     const body = JSON.stringify({ type: "event_callback", event });

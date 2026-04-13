@@ -134,9 +134,10 @@ async function handleEvent(rawBody: string) {
     return { statusCode: 200, body: "" };
   }
 
-  // All channel messages (top-level and thread replies) are opt-in — disabled by default.
-  // Admins enable via: /squirrel-admin channel-messages on
-  if (isChannelMessage) {
+  // Top-level channel messages are opt-in — disabled by default.
+  // Thread replies are always processed (with discretion).
+  // Admins enable top-level via: /squirrel-admin channel-messages on
+  if (isTopLevelChannelMessage) {
     const setting = await configStore.get("channel_messages").catch(() => undefined);
     if (setting !== "on") {
       return { statusCode: 200, body: "" };
@@ -246,7 +247,7 @@ async function handleCommand(rawBody: string) {
         "• `/squirrel-admin audit [<limit>]` — show recent agent interactions\n" +
         "• `/squirrel-admin audit-thread <channel> <thread_ts>` — show interactions for a thread\n" +
         "• `/squirrel-admin token-limit [<channel|default> [<limit>]]` — show or set per-channel token limit\n" +
-        "• `/squirrel-admin channel-messages [on|off]` — show or set channel and thread message responses (default: off)\n" +
+        "• `/squirrel-admin channel-messages [on|off]` — show or set channel message responses (default: off)\n" +
         "• `/squirrel-admin check` — verify connectivity to all data sources\n" +
         "• `/squirrel-admin help` — show this message\n" +
         "_Built `" + GIT_SHA + "` at " + BUILD_TIME + "_"

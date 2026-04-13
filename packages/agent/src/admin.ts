@@ -341,8 +341,8 @@ async function handleChannelMessages(args: string[], configStore: ConfigStore): 
   await configStore.set("channel_messages", setting);
   const emoji = setting === "on" ? "✅" : "❌";
   const detail = setting === "on"
-    ? "The bot will now respond to all channel messages and thread replies (with discretion)."
-    : "The bot will only respond to @mentions and DMs.";
+    ? "The bot will now respond to all channel messages (with discretion)."
+    : "The bot will only respond to @mentions, thread replies, and DMs.";
   return `${emoji} Channel message responses turned *${setting}*. ${detail}`;
 }
 
