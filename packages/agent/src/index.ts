@@ -3,9 +3,9 @@ import {
   ReceiveMessageCommand,
   DeleteMessageCommand,
 } from "@aws-sdk/client-sqs";
-import { PostgresConfigStore, PostgresAuditStore, PostgresUrlStore } from "@arbor/db";
+import { PostgresConfigStore, PostgresAuditStore, PostgresUrlStore, PostgresUserStore } from "@arbor/db";
 import { createAuditLogger } from "@arbor/logger";
-import { fetchChannelHistory, fetchThreadHistory, fetchSlackImages, postMessage, postEphemeral } from "./slack.js";
+import { fetchChannelHistory, fetchThreadHistory, fetchSlackImages, lookupSlackUser, postMessage, postEphemeral } from "./slack.js";
 import type { SlackFile } from "./slack.js";
 import { runAgent } from "./agent.js";
 import { buildPrompt, buildSystemPrompt } from "./prompt.js";
@@ -30,6 +30,7 @@ const sqsClient = new SQSClient({ region: process.env.AWS_REGION });
 const configStore = new PostgresConfigStore(DATABASE_URL);
 const urlStore = new PostgresUrlStore(DATABASE_URL);
 const auditStore = new PostgresAuditStore(DATABASE_URL);
+const userStore = new PostgresUserStore(DATABASE_URL);
 const auditLogger = createAuditLogger(auditStore);
 const IDLE_TIMEOUT_MS =
   parseInt(process.env.IDLE_TIMEOUT ?? "15", 10) * 60 * 1000;
@@ -74,6 +75,19 @@ export async function processEvent(event: SlackEvent): Promise<void> {
   const images = event.files?.length
     ? await fetchSlackImages(event.files).catch(() => [])
     : [];
+
+  // Cache the user's real name in the background — don't block the response
+  if (event.user) {
+    lookupSlackUser(event.user)
+      .then((info) => {
+        if (info) {
+          return userStore.upsert({ user_id: event.user, ...info }).catch((err) =>
+            console.warn("[users] Failed to upsert user:", err)
+          );
+        }
+      })
+      .catch(() => { /* non-critical */ });
+  }
 
   const start = Date.now();
   const response = await runAgent(prompt, systemPrompt, model, maxTokens, images);
