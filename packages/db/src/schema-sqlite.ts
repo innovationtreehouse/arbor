@@ -1,5 +1,12 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
+export const slackUsers = sqliteTable("slack_users", {
+  user_id: text("user_id").primaryKey(),
+  real_name: text("real_name").notNull(),
+  display_name: text("display_name").notNull(),
+  updated_at: text("updated_at").notNull().$default(() => new Date().toISOString()),
+});
+
 export const urlConfig = sqliteTable("url_config", {
   url: text("url").primaryKey(),
   description: text("description").notNull(),

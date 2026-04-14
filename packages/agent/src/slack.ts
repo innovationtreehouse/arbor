@@ -70,6 +70,30 @@ export async function postEphemeral(
 }
 
 // ---------------------------------------------------------------------------
+// User lookup
+// ---------------------------------------------------------------------------
+
+export interface SlackUserInfo {
+  real_name: string;
+  display_name: string;
+}
+
+export async function lookupSlackUser(userId: string): Promise<SlackUserInfo | undefined> {
+  try {
+    const result = await client.users.info({ user: userId });
+    const profile = result.user?.profile;
+    if (!profile) return undefined;
+    return {
+      real_name: profile.real_name ?? profile.display_name ?? userId,
+      display_name: profile.display_name ?? profile.real_name ?? userId,
+    };
+  } catch (err) {
+    console.warn(`[slack] Failed to look up user ${userId}:`, err);
+    return undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Image fetching
 // ---------------------------------------------------------------------------
 

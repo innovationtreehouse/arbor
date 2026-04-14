@@ -4,12 +4,14 @@ const mockPostMessage = vi.fn().mockResolvedValue({ ok: true });
 const mockPostEphemeral = vi.fn().mockResolvedValue({ ok: true });
 const mockReplies = vi.fn().mockResolvedValue({ ok: true, messages: [] });
 const mockHistory = vi.fn().mockResolvedValue({ ok: true, messages: [] });
+const mockUsersInfo = vi.fn().mockResolvedValue({ ok: true, user: { profile: { real_name: "Jane Doe", display_name: "jane" } } });
 
 vi.mock("@slack/web-api", () => ({
   WebClient: vi.fn().mockImplementation(function () {
     return {
       chat: { postMessage: mockPostMessage, postEphemeral: mockPostEphemeral },
       conversations: { replies: mockReplies, history: mockHistory },
+      users: { info: mockUsersInfo },
     };
   }),
 }));
@@ -18,7 +20,7 @@ const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
 // Import after mocking
-const { fetchThreadHistory, postMessage, fetchSlackImages } = await import("../slack.js");
+const { fetchThreadHistory, postMessage, fetchSlackImages, lookupSlackUser } = await import("../slack.js");
 
 process.env.SLACK_BOT_TOKEN = "xoxb-test-token";
 
@@ -167,5 +169,33 @@ describe("fetchSlackImages", () => {
     ]);
     expect(results).toHaveLength(1);
     expect(results[0].mediaType).toBe("image/png");
+  });
+});
+
+describe("lookupSlackUser", () => {
+  beforeEach(() => {
+    mockUsersInfo.mockClear();
+  });
+
+  it("returns real_name and display_name from Slack profile", async () => {
+    mockUsersInfo.mockResolvedValueOnce({
+      ok: true,
+      user: { profile: { real_name: "Jane Doe", display_name: "jane" } },
+    });
+    const result = await lookupSlackUser("U123");
+    expect(result).toEqual({ real_name: "Jane Doe", display_name: "jane" });
+    expect(mockUsersInfo).toHaveBeenCalledWith({ user: "U123" });
+  });
+
+  it("returns undefined when the API call throws", async () => {
+    mockUsersInfo.mockRejectedValueOnce(new Error("network error"));
+    const result = await lookupSlackUser("U123");
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined when profile is missing", async () => {
+    mockUsersInfo.mockResolvedValueOnce({ ok: true, user: {} });
+    const result = await lookupSlackUser("U123");
+    expect(result).toBeUndefined();
   });
 });
