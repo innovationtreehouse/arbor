@@ -22,5 +22,10 @@ export const auditLog = pgTable("audit_log", {
   response: text("response").notNull(),
   model: text("model"),
   duration_ms: integer("duration_ms").notNull(),
+  input_tokens: integer("input_tokens").notNull().default(0),
+  output_tokens: integer("output_tokens").notNull().default(0),
+  cache_read_tokens: integer("cache_read_tokens").notNull().default(0),
+  cache_creation_tokens: integer("cache_creation_tokens").notNull().default(0),
+  cost_usd: text("cost_usd").notNull().default("0"),
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

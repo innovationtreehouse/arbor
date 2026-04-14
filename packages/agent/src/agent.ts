@@ -3,13 +3,22 @@ import * as path from "path";
 import { randomUUID } from "crypto";
 import type { ImageContent } from "./slack.js";
 
+export interface AgentResult {
+  result: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  costUsd: number;
+}
+
 export async function runAgent(
   prompt: string,
   systemPrompt: string,
   model?: string,
   maxTokens?: number,
   images?: ImageContent[],
-): Promise<string> {
+): Promise<AgentResult> {
   const maxRetries = parseInt(process.env.MAX_MCP_RETRIES ?? "2", 10);
   let lastError: Error | undefined;
 
@@ -82,7 +91,7 @@ async function runAgentOnce(
   model?: string,
   maxTokens?: number,
   images?: ImageContent[],
-): Promise<string> {
+): Promise<AgentResult> {
   const urlFetcherPath = path.resolve(
     __dirname,
     "../../mcp-url-fetcher/dist/index.js"
@@ -105,6 +114,11 @@ async function runAgentOnce(
     : prompt;
 
   let result = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheCreationTokens = 0;
+  let costUsd = 0;
 
   for await (const message of query({
     prompt: sdkPrompt,
@@ -174,8 +188,24 @@ async function runAgentOnce(
   })) {
     if ("result" in message) {
       result = message.result;
+      const msg = message as Record<string, unknown>;
+      costUsd = typeof msg.total_cost_usd === "number" ? msg.total_cost_usd : 0;
+      const usage = msg.usage as Record<string, number> | undefined;
+      if (usage) {
+        inputTokens = usage.inputTokens ?? 0;
+        outputTokens = usage.outputTokens ?? 0;
+        cacheReadTokens = usage.cacheReadInputTokens ?? 0;
+        cacheCreationTokens = usage.cacheCreationInputTokens ?? 0;
+      }
     }
   }
 
-  return result || "I was unable to generate a response.";
+  return {
+    result: result || "I was unable to generate a response.",
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheCreationTokens,
+    costUsd,
+  };
 }

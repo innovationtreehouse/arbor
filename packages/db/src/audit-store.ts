@@ -22,6 +22,11 @@ export class PostgresAuditStore implements AuditStore {
       response: record.response,
       model: record.model ?? null,
       duration_ms: record.duration_ms,
+      input_tokens: record.input_tokens,
+      output_tokens: record.output_tokens,
+      cache_read_tokens: record.cache_read_tokens,
+      cache_creation_tokens: record.cache_creation_tokens,
+      cost_usd: record.cost_usd,
     });
   }
 
@@ -54,6 +59,11 @@ function toRecord(row: typeof auditLog.$inferSelect): AuditRecord {
     response: row.response,
     model: row.model,
     duration_ms: row.duration_ms,
+    input_tokens: row.input_tokens,
+    output_tokens: row.output_tokens,
+    cache_read_tokens: row.cache_read_tokens,
+    cache_creation_tokens: row.cache_creation_tokens,
+    cost_usd: row.cost_usd,
     created_at: row.created_at.toISOString(),
   };
 }
