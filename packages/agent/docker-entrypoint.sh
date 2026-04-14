@@ -22,12 +22,17 @@ if [ -n "$SERVICE_ACCOUNT_PATH" ]; then
   until wget -qO- "http://127.0.0.1:${PROXY_PORT}/health" >/dev/null 2>&1; do
     i=$((i + 1))
     if [ "$i" -ge 30 ]; then
-      echo "[entrypoint] ERROR: gdrive proxy did not become healthy after 30s"
-      exit 1
+      echo "[entrypoint] WARNING: gdrive proxy did not become healthy after 30s — starting without Google Drive"
+      kill "$PROXY_PID" 2>/dev/null || true
+      unset GDRIVE_MCP_PROXY_URL
+      break
     fi
     sleep 1
   done
-  echo "[entrypoint] Proxy ready after ${i}s"
+
+  if [ -n "$GDRIVE_MCP_PROXY_URL" ]; then
+    echo "[entrypoint] Proxy ready after ${i}s"
+  fi
 else
   echo "[entrypoint] GOOGLE_CREDENTIALS not set — gdrive MCP proxy not started"
 fi
