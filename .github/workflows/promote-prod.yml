@@ -13,7 +13,7 @@ permissions:
   actions: none
   checks: none
   issues: none
-  packages: none
+  packages: write
   pull-requests: write # required to comment on merged PRs
   statuses: none
 
@@ -82,34 +82,27 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_PROD }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Log in to ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
 
       - name: Verify SHA was deployed to dev
         env:
-          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           SHA_INPUT: ${{ inputs.sha }}
         run: |
           # Fail fast before migrations if this SHA was never built and pushed to dev
-          aws ecr describe-images \
-            --repository-name arbor-agent \
-            --image-ids imageTag=$SHA_INPUT \
-            --query 'imageDetails[0].imageTags' \
-            --output text
-          echo "SHA $SHA_INPUT confirmed in ECR."
+          docker manifest inspect ghcr.io/innovationtreehouse/arbor-agent:$SHA_INPUT
+          echo "SHA $SHA_INPUT confirmed in GHCR."
 
       - name: Pull and tag as prod
         env:
-          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           SHA: ${{ inputs.sha }}
         run: |
-          docker pull $REGISTRY/arbor-agent:$SHA
-          docker tag  $REGISTRY/arbor-agent:$SHA $REGISTRY/arbor-agent:prod
-          docker push $REGISTRY/arbor-agent:prod
-          docker pull $REGISTRY/arbor-agent:migrate-$SHA
-          docker tag  $REGISTRY/arbor-agent:migrate-$SHA $REGISTRY/arbor-agent:migrate-prod
-          docker push $REGISTRY/arbor-agent:migrate-prod
+          docker pull ghcr.io/innovationtreehouse/arbor-agent:$SHA
+          docker tag  ghcr.io/innovationtreehouse/arbor-agent:$SHA ghcr.io/innovationtreehouse/arbor-agent:prod
+          docker push ghcr.io/innovationtreehouse/arbor-agent:prod
+          docker pull ghcr.io/innovationtreehouse/arbor-agent:migrate-$SHA
+          docker tag  ghcr.io/innovationtreehouse/arbor-agent:migrate-$SHA ghcr.io/innovationtreehouse/arbor-agent:migrate-prod
+          docker push ghcr.io/innovationtreehouse/arbor-agent:migrate-prod
 
       - name: Download Lambda zip from S3
         env:
@@ -134,13 +127,11 @@ jobs:
         id: register-migrate-task-def-prod
         env:
           SHA: ${{ inputs.sha }}
-          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
-          REGION: ${{ secrets.AWS_REGION }}
         run: |
           aws ecs describe-task-definition \
             --task-definition arbor-migrate-prod \
             --query taskDefinition \
-          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:migrate-$SHA" \
+          | jq --arg img "ghcr.io/innovationtreehouse/arbor-agent:migrate-$SHA" \
               'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                    .compatibilities, .registeredAt, .registeredBy)
                | .containerDefinitions[0].image = $img
@@ -198,8 +189,6 @@ jobs:
         env:
           SHA: ${{ inputs.sha }}
           DEPLOY_TAG: ${{ steps.release-tag.outputs.tag }}
-          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
-          REGION: ${{ secrets.AWS_REGION }}
           REPO: ${{ github.repository }}
         run: |
           PREV_SHA=$(aws ssm get-parameter \
@@ -213,7 +202,7 @@ jobs:
           aws ecs describe-task-definition \
             --task-definition arbor-agent-prod \
             --query taskDefinition \
-          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:$SHA" \
+          | jq --arg img "ghcr.io/innovationtreehouse/arbor-agent:$SHA" \
                --arg sha "$SHA" \
                --arg tag "$DEPLOY_TAG" \
                --arg diff_url "$DIFF_URL" \
