@@ -61,19 +61,23 @@ SQLite tables (`url_config`, `agent_config`, `audit_log`) are created automatica
 
 ### Migrations (PostgreSQL)
 
-Schema changes are managed with [Drizzle Kit](https://orm.drizzle.team/kit-docs/overview) in `packages/db`.
+Schema changes are managed with [Prisma Migrate](https://www.prisma.io/docs/orm/prisma-migrate) in `packages/db`. The Postgres schema lives in `packages/db/prisma/postgres/schema.prisma`; the SQLite schema (`packages/db/prisma/sqlite/schema.prisma`) mirrors it and is bootstrapped at runtime, so it needs no migrations.
 
 ```bash
-# Generate a new migration file from schema changes
-cd packages/db
-DATABASE_URL="postgres://..." npm run db:generate
+# Regenerate the Prisma clients after editing either schema
+# (also runs automatically on `npm install` via the db package's postinstall)
+npm run -w @arbor/db db:generate
 
-# Apply pending migrations to the database
+# Author a new migration from Postgres schema changes (needs a dev DATABASE_URL)
+cd packages/db
+DATABASE_URL="postgres://..." npx prisma migrate dev --config prisma.config.postgres.ts
+
+# Apply pending migrations to a database
 cd packages/db
 DATABASE_URL="postgres://..." npm run db:migrate
 ```
 
-Migration files are written to `packages/db/drizzle/`. Commit them alongside schema changes.
+Migration files are written to `packages/db/prisma/postgres/migrations/`. Commit them alongside schema changes.
 
 ---
 
@@ -93,7 +97,7 @@ The Claude automation workflow (`claude.yml`) is triggered by the CI workflow co
 
 ```
 packages/
-  db/               @arbor/db — Drizzle schema, UrlStore, ConfigStore, AuditStore,
+  db/               @arbor/db — Prisma schemas, UrlStore, ConfigStore, AuditStore,
                                 PostgreSQL and SQLite implementations, createStores factory
   logger/           @arbor/logger — createAuditLogger (error-swallowing audit wrapper)
   agent/            ECS container — SQS polling loop, Claude agent runner, audit logging

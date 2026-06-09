@@ -499,7 +499,7 @@ fi
 # from this machine, uncomment the next line:
 # (cd packages/db && DATABASE_URL="$DATABASE_URL" npm run db:migrate)
 #
-# Otherwise, apply manually. The current schema (packages/db/drizzle/):
+# Otherwise, apply manually. The current schema (packages/db/prisma/postgres/migrations/):
 #
 #   CREATE TABLE IF NOT EXISTS url_config (
 #     url         TEXT PRIMARY KEY,
@@ -719,9 +719,10 @@ TASK_DEF_ARN=$(aws ecs register-task-definition \
   --cli-input-json "file:///tmp/arbor-task-def-${E}.json" \
   --query 'taskDefinition.taskDefinitionArn' --output text)
 
-# Migration task definition — short-lived task that runs drizzle-kit migrate
-# and exits. The deploy workflow runs this before deploying code, keeping the
-# DB inside the VPC and avoiding the need for external DB access from CI.
+# Migration task definition — short-lived task that runs prisma migrate deploy
+# and exits. The deploy workflow rebuilds this from the dedicated `migrate`
+# image (whose default CMD runs the migration) before deploying code, keeping
+# the DB inside the VPC and avoiding the need for external DB access from CI.
 cat > /tmp/arbor-migrate-task-def-${E}.json <<MIGRATEDEF
 {
   "family": "arbor-migrate-${E}",
@@ -736,7 +737,7 @@ cat > /tmp/arbor-migrate-task-def-${E}.json <<MIGRATEDEF
     "name": "arbor-migrate",
     "image": "${REGISTRY}/arbor-agent:latest",
     "essential": true,
-    "entryPoint": ["drizzle-kit", "migrate"],
+    "entryPoint": ["/app/node_modules/.bin/prisma", "migrate", "deploy", "--config", "prisma.config.postgres.ts"],
     "workingDirectory": "/app/packages/db",
     "logConfiguration": {
       "logDriver": "awslogs",

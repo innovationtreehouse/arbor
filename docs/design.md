@@ -430,7 +430,7 @@ All commands are invoked as `/squirrel-admin <subcommand> [args]`. Responses are
 
 ### 9.3 Config Storage (PostgreSQL)
 
-URL configurations are stored in the `url_config` PostgreSQL table. Agent settings (such as the active model) are stored in the `agent_config` table. Both are managed via Drizzle ORM in the `@arbor/db` package. See §3.2a for the full schema.
+URL configurations are stored in the `url_config` PostgreSQL table. Agent settings (such as the active model) are stored in the `agent_config` table. Both are managed via Prisma ORM in the `@arbor/db` package. See §3.2a for the full schema.
 
 The Lambda handler reads/writes both tables for admin commands. The `url-fetcher` MCP server reads `url_config` on a 60-second poll interval. The agent reads `agent_config` on every message.
 

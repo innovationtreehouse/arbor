@@ -101,7 +101,7 @@ All responses are ephemeral (visible only to the command sender). The `add` comm
 
 ### Database Schema
 
-The URL allowlist is stored in a PostgreSQL table managed by the `@arbor/db` package using Drizzle ORM. The schema is defined in `packages/db/src/schema.ts`.
+The URL allowlist is stored in a PostgreSQL table managed by the `@arbor/db` package using Prisma ORM. The schema is defined in `packages/db/prisma/postgres/schema.prisma`.
 
 ```sql
 CREATE TABLE url_config (

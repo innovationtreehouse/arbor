@@ -1,60 +1,68 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
-import { desc, eq, and } from "drizzle-orm";
-import { auditLog } from "./schema.js";
+import { createPostgresClient, type PostgresClient } from "./prisma-postgres.js";
 import type { AuditStore, AuditRecord, NewAuditRecord } from "./store.js";
+
+type AuditLogRow = {
+  id: number;
+  channel: string;
+  threadTs: string;
+  userId: string;
+  prompt: string;
+  response: string;
+  model: string | null;
+  durationMs: number;
+  createdAt: Date;
+};
 
 /* v8 ignore start */
 export class PostgresAuditStore implements AuditStore {
-  private db: ReturnType<typeof drizzle>;
+  private db: PostgresClient;
 
   constructor(connectionString: string) {
-    const client = postgres(connectionString);
-    this.db = drizzle(client, { schema: { auditLog } });
+    this.db = createPostgresClient(connectionString);
   }
 
   async write(record: NewAuditRecord): Promise<void> {
-    await this.db.insert(auditLog).values({
-      channel: record.channel,
-      thread_ts: record.thread_ts,
-      user_id: record.user_id,
-      prompt: record.prompt,
-      response: record.response,
-      model: record.model ?? null,
-      duration_ms: record.duration_ms,
+    await this.db.auditLog.create({
+      data: {
+        channel: record.channel,
+        threadTs: record.thread_ts,
+        userId: record.user_id,
+        prompt: record.prompt,
+        response: record.response,
+        model: record.model ?? null,
+        durationMs: record.duration_ms,
+      },
     });
   }
 
   async listRecent(limit: number): Promise<AuditRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(auditLog)
-      .orderBy(desc(auditLog.created_at))
-      .limit(limit);
+    const rows = await this.db.auditLog.findMany({
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
     return rows.map(toRecord);
   }
 
   async listByThread(channel: string, thread_ts: string): Promise<AuditRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(auditLog)
-      .where(and(eq(auditLog.channel, channel), eq(auditLog.thread_ts, thread_ts)))
-      .orderBy(desc(auditLog.created_at));
+    const rows = await this.db.auditLog.findMany({
+      where: { channel, threadTs: thread_ts },
+      orderBy: { createdAt: "desc" },
+    });
     return rows.map(toRecord);
   }
 }
 
-function toRecord(row: typeof auditLog.$inferSelect): AuditRecord {
+function toRecord(row: AuditLogRow): AuditRecord {
   return {
     id: row.id,
     channel: row.channel,
-    thread_ts: row.thread_ts,
-    user_id: row.user_id,
+    thread_ts: row.threadTs,
+    user_id: row.userId,
     prompt: row.prompt,
     response: row.response,
     model: row.model,
-    duration_ms: row.duration_ms,
-    created_at: row.created_at.toISOString(),
+    duration_ms: row.durationMs,
+    created_at: row.createdAt.toISOString(),
   };
 }
 /* v8 ignore stop */

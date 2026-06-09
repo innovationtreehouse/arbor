@@ -5,6 +5,10 @@ setup-per-env.sh
 dist/
 *.js.map
 *.tsbuildinfo
+
+# Generated Prisma clients (regenerated via `npm run -w @arbor/db db:generate`,
+# also run automatically on install via the package's postinstall hook)
+packages/db/generated/
 .env
 .env.*
 coverage/
