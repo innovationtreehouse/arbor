@@ -7,18 +7,20 @@
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:generate": "prisma generate --schema prisma/postgres/schema.prisma && prisma generate --schema prisma/sqlite/schema.prisma",
+    "db:migrate": "prisma migrate deploy --config prisma.config.postgres.ts",
+    "postinstall": "npm run db:generate"
   },
   "dependencies": {
-    "drizzle-orm": "^0.33.0",
-    "postgres": "^3.4.0"
+    "@prisma/adapter-better-sqlite3": "^7.8.0",
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "better-sqlite3": "^9.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
-    "better-sqlite3": "^9.0.0",
     "@types/node": "^22.0.0",
-    "drizzle-kit": "^0.24.0",
+    "prisma": "^7.8.0",
     "typescript": "^5.0.0"
   }
 }

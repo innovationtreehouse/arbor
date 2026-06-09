@@ -5,4 +5,3 @@ export { PostgresAuditStore } from "./audit-store.js";
 export { SqliteUrlStore, SqliteConfigStore, SqliteAuditStore } from "./sqlite-stores.js";
 export type { StoreSet } from "./create-stores.js";
 export { createStores } from "./create-stores.js";
-export { urlConfig, agentConfig, auditLog } from "./schema.js";

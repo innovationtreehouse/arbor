@@ -153,7 +153,7 @@ jobs:
           echo "task_def_arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
 
       - name: Run database migrations (prod)
-        # Runs drizzle-kit migrate in a short-lived ECS task inside the VPC,
+        # Runs prisma migrate deploy in a short-lived ECS task inside the VPC,
         # so the DB does not need to be reachable from GitHub Actions runners.
         # Migrations run before code deploy — if a subsequent step fails and you
         # need to roll back, apply a new migration that undoes the schema change.

@@ -14,7 +14,12 @@ COPY packages/db/package.json ./packages/db/
 COPY packages/logger/package.json ./packages/logger/
 COPY packages/mcp-url-fetcher/package.json ./packages/mcp-url-fetcher/
 
-# Install all dependencies (including native modules like better-sqlite3)
+# Prisma schemas must be present before install: @arbor/db's postinstall runs
+# `prisma generate` for both the Postgres and SQLite clients.
+COPY packages/db/prisma ./packages/db/prisma
+
+# Install all dependencies (including native modules like better-sqlite3).
+# Triggers the @arbor/db postinstall, generating clients into packages/db/generated.
 RUN npm install --workspaces
 
 # Copy source
@@ -34,22 +39,22 @@ RUN npm run -w @arbor/mcp-url-fetcher build
 RUN npm run -w @arbor/agent build
 
 # ---------------------------------------------------------------------------
-# Migration runner — runs drizzle-kit migrate and exits
+# Migration runner — runs prisma migrate deploy and exits
 # ---------------------------------------------------------------------------
 FROM --platform=linux/arm64 node:22-alpine AS migrate
 
 WORKDIR /app
 
-COPY --from=builder /build/packages/db/dist ./packages/db/dist
 COPY --from=builder /build/packages/db/package.json ./packages/db/
-COPY --from=builder /build/packages/db/src ./packages/db/src
-COPY packages/db/drizzle ./packages/db/drizzle
-COPY packages/db/drizzle.config.ts ./packages/db/
+COPY packages/db/prisma ./packages/db/prisma
+COPY packages/db/prisma.config.postgres.ts ./packages/db/
 COPY --from=builder /build/node_modules ./node_modules
 COPY package.json ./
 
 WORKDIR /app/packages/db
-CMD ["/app/node_modules/.bin/drizzle-kit", "migrate"]
+# Applies pending migrations from prisma/postgres/migrations, then exits.
+# DATABASE_URL is supplied by the ECS migrate task at run time.
+CMD ["/app/node_modules/.bin/prisma", "migrate", "deploy", "--config", "prisma.config.postgres.ts"]
 
 # ---------------------------------------------------------------------------
 FROM --platform=linux/arm64 node:22-alpine AS runtime
@@ -61,6 +66,9 @@ COPY --from=builder /build/packages/agent/dist ./packages/agent/dist
 COPY --from=builder /build/packages/agent/package.json ./packages/agent/
 COPY --from=builder /build/packages/db/dist ./packages/db/dist
 COPY --from=builder /build/packages/db/package.json ./packages/db/
+# Generated Prisma clients live outside dist; the compiled db code requires them
+# at ../generated relative to dist.
+COPY --from=builder /build/packages/db/generated ./packages/db/generated
 COPY --from=builder /build/packages/logger/dist ./packages/logger/dist
 COPY --from=builder /build/packages/logger/package.json ./packages/logger/
 COPY --from=builder /build/packages/mcp-url-fetcher/dist ./packages/mcp-url-fetcher/dist
