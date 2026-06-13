@@ -194,18 +194,29 @@ async function ensureAgentRunning() {
 
   if (listResult.taskArns && listResult.taskArns.length > 0) return;
 
+  // Prod runs the agent on the ECS Managed Instances capacity provider with host
+  // networking (set ECS_CAPACITY_PROVIDER, e.g. "arbor-prod-provider"): no
+  // launchType/networkConfiguration — egress is via the instance's public IP.
+  // Dev leaves the var unset and stays on Fargate in awsvpc mode with a public IP.
+  const capacityProvider = process.env.ECS_CAPACITY_PROVIDER;
   await ecsClient.send(
     new RunTaskCommand({
       cluster: process.env.ECS_CLUSTER!,
       taskDefinition: process.env.ECS_TASK_FAMILY!,
-      launchType: "FARGATE",
-      networkConfiguration: {
-        awsvpcConfiguration: {
-          subnets: process.env.SUBNET_IDS!.split(","),
-          securityGroups: process.env.SECURITY_GROUP_IDS!.split(","),
-          assignPublicIp: "ENABLED",
-        },
-      },
+      ...(capacityProvider
+        ? {
+            capacityProviderStrategy: [{ capacityProvider, weight: 1 }],
+          }
+        : {
+            launchType: "FARGATE",
+            networkConfiguration: {
+              awsvpcConfiguration: {
+                subnets: process.env.SUBNET_IDS!.split(","),
+                securityGroups: process.env.SECURITY_GROUP_IDS!.split(","),
+                assignPublicIp: "ENABLED",
+              },
+            },
+          }),
     })
   );
 }

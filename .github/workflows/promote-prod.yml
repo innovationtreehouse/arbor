@@ -13,7 +13,7 @@ permissions:
   actions: none
   checks: none
   issues: none
-  packages: none
+  packages: write      # required to push images to ghcr.io
   pull-requests: write # required to comment on merged PRs
   statuses: none
 
@@ -82,34 +82,33 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_PROD }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Log in to ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify SHA was deployed to dev
         env:
-          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE: ghcr.io/innovationtreehouse/arbor-agent
           SHA_INPUT: ${{ inputs.sha }}
         run: |
           # Fail fast before migrations if this SHA was never built and pushed to dev
-          aws ecr describe-images \
-            --repository-name arbor-agent \
-            --image-ids imageTag=$SHA_INPUT \
-            --query 'imageDetails[0].imageTags' \
-            --output text
-          echo "SHA $SHA_INPUT confirmed in ECR."
+          docker buildx imagetools inspect $IMAGE:$SHA_INPUT >/dev/null
+          echo "SHA $SHA_INPUT confirmed in ghcr.io."
 
       - name: Pull and tag as prod
         env:
-          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE: ghcr.io/innovationtreehouse/arbor-agent
           SHA: ${{ inputs.sha }}
         run: |
-          docker pull $REGISTRY/arbor-agent:$SHA
-          docker tag  $REGISTRY/arbor-agent:$SHA $REGISTRY/arbor-agent:prod
-          docker push $REGISTRY/arbor-agent:prod
-          docker pull $REGISTRY/arbor-agent:migrate-$SHA
-          docker tag  $REGISTRY/arbor-agent:migrate-$SHA $REGISTRY/arbor-agent:migrate-prod
-          docker push $REGISTRY/arbor-agent:migrate-prod
+          docker pull $IMAGE:$SHA
+          docker tag  $IMAGE:$SHA $IMAGE:prod
+          docker push $IMAGE:prod
+          docker pull $IMAGE:migrate-$SHA
+          docker tag  $IMAGE:migrate-$SHA $IMAGE:migrate-prod
+          docker push $IMAGE:migrate-prod
 
       - name: Download Lambda zip from S3
         env:
@@ -140,7 +139,7 @@ jobs:
           aws ecs describe-task-definition \
             --task-definition arbor-migrate-prod \
             --query taskDefinition \
-          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:migrate-$SHA" \
+          | jq --arg img "ghcr.io/innovationtreehouse/arbor-agent:migrate-$SHA" \
               'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                    .compatibilities, .registeredAt, .registeredBy)
                | .containerDefinitions[0].image = $img
@@ -166,7 +165,7 @@ jobs:
             --cluster arbor-prod \
             --task-definition "${{ steps.register-migrate-task-def-prod.outputs.task_def_arn }}" \
             --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS_PROD }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID_PROD }}],assignPublicIp=DISABLED}" \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS_PROD }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID_PROD }}],assignPublicIp=ENABLED}" \
             --overrides "{\"containerOverrides\":[{\"name\":\"arbor-migrate\",\"environment\":[{\"name\":\"DATABASE_URL\",\"value\":\"${{ secrets.DATABASE_URL_PROD }}\"}]}]}" \
             --query 'tasks[0].taskArn' --output text)
           echo "Migration task: $TASK_ARN"
@@ -213,7 +212,7 @@ jobs:
           aws ecs describe-task-definition \
             --task-definition arbor-agent-prod \
             --query taskDefinition \
-          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:$SHA" \
+          | jq --arg img "ghcr.io/innovationtreehouse/arbor-agent:$SHA" \
                --arg sha "$SHA" \
                --arg tag "$DEPLOY_TAG" \
                --arg diff_url "$DIFF_URL" \

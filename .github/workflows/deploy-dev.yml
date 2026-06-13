@@ -13,7 +13,7 @@ permissions:
   actions: none
   checks: none
   issues: none
-  packages: none
+  packages: write      # required to push images to ghcr.io
   pull-requests: write # required to comment on merged PRs
   statuses: none
 
@@ -77,47 +77,47 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_DEV }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Log in to ECR
+      - name: Log in to ghcr.io
         if: env.SKIP_DEPLOY != 'true'
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
         if: env.SKIP_DEPLOY != 'true'
         env:
-          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE: ghcr.io/innovationtreehouse/arbor-agent
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           docker buildx build --platform linux/arm64 \
             --push \
-            -t $REGISTRY/arbor-agent:$SHA \
-            -t $REGISTRY/arbor-agent:dev \
+            -t $IMAGE:$SHA \
+            -t $IMAGE:dev \
             -f packages/agent/Dockerfile .
 
       - name: Build and push migrate image
         if: env.SKIP_DEPLOY != 'true'
         env:
-          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE: ghcr.io/innovationtreehouse/arbor-agent
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           docker buildx build --platform linux/arm64 \
             --target migrate \
             --push \
-            -t $REGISTRY/arbor-agent:migrate-$SHA \
-            -t $REGISTRY/arbor-agent:migrate-dev \
+            -t $IMAGE:migrate-$SHA \
+            -t $IMAGE:migrate-dev \
             -f packages/agent/Dockerfile .
 
       - name: Verify image is pullable (dev)
         if: env.SKIP_DEPLOY != 'true'
         env:
+          IMAGE: ghcr.io/innovationtreehouse/arbor-agent
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          aws ecr describe-images \
-            --repository-name arbor-agent \
-            --image-ids imageTag=$SHA \
-            --query 'imageDetails[0].imageTags' \
-            --output text
-          echo "Image $SHA confirmed in ECR."
+          docker buildx imagetools inspect $IMAGE:$SHA >/dev/null
+          echo "Image $SHA confirmed in ghcr.io."
 
       - name: Build Lambda zip
         if: env.SKIP_DEPLOY != 'true'
@@ -174,7 +174,7 @@ jobs:
           aws ecs describe-task-definition \
             --task-definition arbor-migrate-dev \
             --query taskDefinition \
-          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:migrate-$SHA" \
+          | jq --arg img "ghcr.io/innovationtreehouse/arbor-agent:migrate-$SHA" \
               'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                    .compatibilities, .registeredAt, .registeredBy)
                | .containerDefinitions[0].image = $img
@@ -201,7 +201,7 @@ jobs:
             --cluster arbor-dev \
             --task-definition "${{ steps.register-migrate-task-def-dev.outputs.task_def_arn }}" \
             --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS_DEV }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID_DEV }}],assignPublicIp=DISABLED}" \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS_DEV }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID_DEV }}],assignPublicIp=ENABLED}" \
             --overrides "{\"containerOverrides\":[{\"name\":\"arbor-migrate\",\"environment\":[{\"name\":\"DATABASE_URL\",\"value\":\"${{ secrets.DATABASE_URL_DEV }}\"}]}]}" \
             --query 'tasks[0].taskArn' --output text)
           echo "Migration task: $TASK_ARN"
@@ -254,7 +254,7 @@ jobs:
           aws ecs describe-task-definition \
             --task-definition arbor-agent-dev \
             --query taskDefinition \
-          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:$SHA" \
+          | jq --arg img "ghcr.io/innovationtreehouse/arbor-agent:$SHA" \
               'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                    .compatibilities, .registeredAt, .registeredBy)
                | .containerDefinitions[0].image = $img
