@@ -13,7 +13,7 @@ permissions:
   actions: none
   checks: none
   issues: none
-  packages: none
+  packages: write      # required to push images to ghcr.io
   pull-requests: write # required to comment on merged PRs
   statuses: none
 
@@ -77,15 +77,18 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_DEV }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Log in to ECR
+      - name: Log in to ghcr.io
         if: env.SKIP_DEPLOY != 'true'
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
         if: env.SKIP_DEPLOY != 'true'
         env:
-          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          REGISTRY: ghcr.io/innovationtreehouse
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           docker buildx build --platform linux/arm64 \
@@ -97,7 +100,7 @@ jobs:
       - name: Build and push migrate image
         if: env.SKIP_DEPLOY != 'true'
         env:
-          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          REGISTRY: ghcr.io/innovationtreehouse
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           docker buildx build --platform linux/arm64 \
@@ -112,12 +115,8 @@ jobs:
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          aws ecr describe-images \
-            --repository-name arbor-agent \
-            --image-ids imageTag=$SHA \
-            --query 'imageDetails[0].imageTags' \
-            --output text
-          echo "Image $SHA confirmed in ECR."
+          docker buildx imagetools inspect ghcr.io/innovationtreehouse/arbor-agent:$SHA
+          echo "Image $SHA confirmed in ghcr.io."
 
       - name: Build Lambda zip
         if: env.SKIP_DEPLOY != 'true'
@@ -168,16 +167,17 @@ jobs:
         id: register-migrate-task-def-dev
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
-          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
-          REGION: ${{ secrets.AWS_REGION }}
+          GHCR_PULL_SECRET_ARN: ${{ secrets.GHCR_PULL_SECRET_ARN }}
         run: |
           aws ecs describe-task-definition \
             --task-definition arbor-migrate-dev \
             --query taskDefinition \
-          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:migrate-$SHA" \
+          | jq --arg img "ghcr.io/innovationtreehouse/arbor-agent:migrate-$SHA" \
+               --arg ghcr "$GHCR_PULL_SECRET_ARN" \
               'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                    .compatibilities, .registeredAt, .registeredBy)
                | .containerDefinitions[0].image = $img
+               | .containerDefinitions[0].repositoryCredentials = {credentialsParameter: $ghcr}
                | del(.containerDefinitions[0].entryPoint)
                | .runtimePlatform = {"cpuArchitecture": "ARM64", "operatingSystemFamily": "LINUX"}' \
           > /tmp/migrate-task-def.json
@@ -248,16 +248,17 @@ jobs:
         id: register-task-def-dev
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
-          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
-          REGION: ${{ secrets.AWS_REGION }}
+          GHCR_PULL_SECRET_ARN: ${{ secrets.GHCR_PULL_SECRET_ARN }}
         run: |
           aws ecs describe-task-definition \
             --task-definition arbor-agent-dev \
             --query taskDefinition \
-          | jq --arg img "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/arbor-agent:$SHA" \
+          | jq --arg img "ghcr.io/innovationtreehouse/arbor-agent:$SHA" \
+               --arg ghcr "$GHCR_PULL_SECRET_ARN" \
               'del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                    .compatibilities, .registeredAt, .registeredBy)
                | .containerDefinitions[0].image = $img
+               | .containerDefinitions[0].repositoryCredentials = {credentialsParameter: $ghcr}
                | .runtimePlatform = {"cpuArchitecture": "ARM64", "operatingSystemFamily": "LINUX"}' \
           > /tmp/task-def.json
           TASK_DEF_ARN=$(aws ecs register-task-definition \
