@@ -1,4 +1,4 @@
-FROM --platform=linux/arm64 node:22-alpine AS builder
+FROM --platform=linux/arm64 node:24-alpine AS builder
 
 # Required to compile native modules (e.g. better-sqlite3)
 RUN apk add --no-cache python3 make g++
@@ -36,7 +36,7 @@ RUN npm run -w @arbor/agent build
 # ---------------------------------------------------------------------------
 # Migration runner — runs drizzle-kit migrate and exits
 # ---------------------------------------------------------------------------
-FROM --platform=linux/arm64 node:22-alpine AS migrate
+FROM --platform=linux/arm64 node:24-alpine AS migrate
 
 WORKDIR /app
 
@@ -52,7 +52,7 @@ WORKDIR /app/packages/db
 CMD ["/app/node_modules/.bin/drizzle-kit", "migrate"]
 
 # ---------------------------------------------------------------------------
-FROM --platform=linux/arm64 node:22-alpine AS runtime
+FROM --platform=linux/arm64 node:24-alpine AS runtime
 
 WORKDIR /app
 
