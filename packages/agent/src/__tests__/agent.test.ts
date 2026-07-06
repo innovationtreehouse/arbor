@@ -24,7 +24,7 @@ describe("runAgent", () => {
       })()
     );
 
-    const result = await runAgent("find the Q4 report", "You are Squirrel.");
+    const { result } = await runAgent("find the Q4 report", "You are Squirrel.");
     expect(result).toBe("Here is the document you requested.");
   });
 
@@ -35,7 +35,7 @@ describe("runAgent", () => {
       })()
     );
 
-    const result = await runAgent("find something", "system");
+    const { result } = await runAgent("find something", "system");
     expect(result).toBe("I was unable to generate a response.");
   });
 
@@ -47,8 +47,49 @@ describe("runAgent", () => {
       })()
     );
 
-    const result = await runAgent("prompt", "system");
+    const { result } = await runAgent("prompt", "system");
     expect(result).toBe("second");
+  });
+
+  it("captures token usage and cost from the result message", async () => {
+    vi.mocked(query).mockReturnValue(
+      (async function* () {
+        yield {
+          result: "answer",
+          total_cost_usd: 0.0042,
+          // real SDKResultMessage.usage uses the API's snake_case keys
+          usage: {
+            input_tokens: 800,
+            output_tokens: 300,
+            cache_read_input_tokens: 150,
+            cache_creation_input_tokens: 50,
+          },
+        };
+      })()
+    );
+
+    const agentResult = await runAgent("prompt", "system");
+    expect(agentResult.result).toBe("answer");
+    expect(agentResult.costUsd).toBeCloseTo(0.0042);
+    expect(agentResult.inputTokens).toBe(800);
+    expect(agentResult.outputTokens).toBe(300);
+    expect(agentResult.cacheReadTokens).toBe(150);
+    expect(agentResult.cacheCreationTokens).toBe(50);
+  });
+
+  it("defaults token counts and cost to zero when usage is absent", async () => {
+    vi.mocked(query).mockReturnValue(
+      (async function* () {
+        yield { result: "ok" };
+      })()
+    );
+
+    const agentResult = await runAgent("prompt", "system");
+    expect(agentResult.costUsd).toBe(0);
+    expect(agentResult.inputTokens).toBe(0);
+    expect(agentResult.outputTokens).toBe(0);
+    expect(agentResult.cacheReadTokens).toBe(0);
+    expect(agentResult.cacheCreationTokens).toBe(0);
   });
 
   it("passes systemPrompt and model to query options", async () => {
@@ -126,7 +167,7 @@ describe("runAgent", () => {
 
     const resultPromise = runAgent("prompt", "system");
     await vi.runAllTimersAsync();
-    const result = await resultPromise;
+    const { result } = await resultPromise;
     expect(result).toBe("recovered");
     expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
     vi.useRealTimers();

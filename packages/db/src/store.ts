@@ -38,6 +38,11 @@ export interface AuditRecord {
   response: string;
   model: string | null;
   duration_ms: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  cost_usd: string;
   created_at: string; // ISO 8601
 }
 

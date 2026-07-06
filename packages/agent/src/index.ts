@@ -76,23 +76,28 @@ export async function processEvent(event: SlackEvent): Promise<void> {
     : [];
 
   const start = Date.now();
-  const response = await runAgent(prompt, systemPrompt, model, maxTokens, images);
+  const agentResult = await runAgent(prompt, systemPrompt, model, maxTokens, images);
   const duration_ms = Date.now() - start;
 
-  if (response.trim() === NO_REPLY_SENTINEL) {
+  if (agentResult.result.trim() === NO_REPLY_SENTINEL) {
     console.log(`[discretion] agent elected not to reply in channel ${event.channel}`);
     return;
   }
 
-  await postMessage(event.channel, event.thread_ts, response);
+  await postMessage(event.channel, event.thread_ts, agentResult.result);
   await auditLogger.log({
     channel: event.channel,
     thread_ts: event.thread_ts,
     user_id: event.user,
     prompt,
-    response,
+    response: agentResult.result,
     model: model ?? null,
     duration_ms,
+    input_tokens: agentResult.inputTokens,
+    output_tokens: agentResult.outputTokens,
+    cache_read_tokens: agentResult.cacheReadTokens,
+    cache_creation_tokens: agentResult.cacheCreationTokens,
+    cost_usd: agentResult.costUsd.toFixed(6),
   });
 }
 

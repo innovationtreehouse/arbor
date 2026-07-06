@@ -45,8 +45,12 @@ vi.mock("../slack.js", () => ({
   postEphemeral: vi.fn().mockResolvedValue(undefined),
 }));
 
+const mockAgentResult = (result: string, costUsd = 0) => ({
+  result, inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, cacheCreationTokens: 5, costUsd,
+});
+
 vi.mock("../agent.js", () => ({
-  runAgent: vi.fn().mockResolvedValue("Agent response"),
+  runAgent: vi.fn().mockResolvedValue(mockAgentResult("Agent response")),
 }));
 
 vi.mock("../prompt.js", () => ({
@@ -103,7 +107,7 @@ describe("processEvent", () => {
   it("fetches thread history, runs agent, and posts response", async () => {
     const history = [{ user: "U1", text: "earlier message" }];
     vi.mocked(fetchThreadHistory).mockResolvedValueOnce(history);
-    vi.mocked(runAgent).mockResolvedValueOnce("Here is your answer.");
+    vi.mocked(runAgent).mockResolvedValueOnce(mockAgentResult("Here is your answer."));
 
     await processEvent(baseEvent);
 
@@ -120,7 +124,7 @@ describe("processEvent", () => {
   });
 
   it("does not post or audit when agent returns the no-reply sentinel", async () => {
-    vi.mocked(runAgent).mockResolvedValueOnce("__NO_REPLY__");
+    vi.mocked(runAgent).mockResolvedValueOnce(mockAgentResult("__NO_REPLY__"));
     await processEvent({ ...baseEvent, requires_discretion: true });
     expect(postMessage).not.toHaveBeenCalled();
     expect(mockAuditLog).not.toHaveBeenCalled();
@@ -136,7 +140,7 @@ describe("processEvent", () => {
   });
 
   it("passes the agent response to postMessage", async () => {
-    vi.mocked(runAgent).mockResolvedValueOnce("Custom agent answer");
+    vi.mocked(runAgent).mockResolvedValueOnce(mockAgentResult("Custom agent answer"));
     await processEvent(baseEvent);
     expect(postMessage).toHaveBeenCalledWith("C_CHAN", "1.0", "Custom agent answer");
   });
@@ -176,9 +180,9 @@ describe("processEvent", () => {
     await expect(processEvent(baseEvent)).rejects.toThrow("Agent failed");
   });
 
-  it("writes audit record with channel, user, model, and duration after posting response", async () => {
+  it("writes audit record with channel, user, model, duration, and token usage after posting response", async () => {
     vi.mocked(mockConfigStore.get).mockResolvedValueOnce("claude-opus-4-6");
-    vi.mocked(runAgent).mockResolvedValueOnce("The answer.");
+    vi.mocked(runAgent).mockResolvedValueOnce(mockAgentResult("The answer.", 0.0042));
 
     await processEvent(baseEvent);
 
@@ -189,6 +193,11 @@ describe("processEvent", () => {
         user_id: "U1",
         response: "The answer.",
         model: "claude-opus-4-6",
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_read_tokens: 10,
+        cache_creation_tokens: 5,
+        cost_usd: "0.004200",
       })
     );
     expect(typeof mockAuditLog.mock.calls[0][0].duration_ms).toBe("number");
