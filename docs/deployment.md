@@ -143,12 +143,13 @@ In **Settings → Environments**, create a `production` environment and add requ
 
 ## Database Migration Safety
 
-Migrations run via `drizzle-kit migrate` against the target environment's `DATABASE_URL`. A few properties of this approach worth understanding:
+Migrations run via `prisma migrate deploy` against the target environment's `DATABASE_URL`. A few properties of this approach worth understanding:
 
 - **Dev runs first.** The deploy-dev workflow runs migrations before updating Lambda or the ECS task definition. Any migration that errors will fail the deploy before traffic is affected.
 - **Prod runs on promotion.** Migrations run against prod before the Lambda zip is deployed. If the migration fails, the old Lambda and task definition remain active.
 - **Migrations must be backwards-compatible.** Because the ECS Fargate task is long-running, there will be a brief window where the new Lambda code is deployed but the existing ECS task is still running the old agent code against the new schema. Avoid breaking schema changes (column renames, drops) without a multi-step migration strategy.
-- **Migration files are version-controlled.** The `packages/db/drizzle/` directory is committed to the repository. `drizzle-kit migrate` applies only the unapplied migrations, making it safe to run repeatedly.
+- **Migration files are version-controlled.** The `packages/db/prisma/postgres/migrations/` directory is committed to the repository. `prisma migrate deploy` applies only the unapplied migrations, making it safe to run repeatedly.
+- **Existing databases self-baseline.** The `20260608000000_init` migration describes the current schema and uses `CREATE TABLE IF NOT EXISTS` (same as the drizzle migration it replaces), so on a database that already has these tables it applies as a no-op and gets recorded in `_prisma_migrations` — no manual `migrate resolve` step, which matters because the databases are only reachable from inside the VPC. Fresh databases get the schema created normally.
 
 ---
 
@@ -172,7 +173,7 @@ Re-run the promote workflow with the previous git SHA. The ECS task definition w
 
 ### Database rollback
 
-Drizzle does not automatically generate down migrations. If a migration needs to be reversed, write a new migration that undoes the change. Do not delete or edit committed migration files.
+Prisma Migrate does not automatically generate down migrations. If a migration needs to be reversed, write a new migration that undoes the change. Do not delete or edit committed migration files.
 
 ---
 

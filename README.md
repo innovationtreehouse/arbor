@@ -14,7 +14,7 @@ Arbor runs Squirrel, a Slack bot that uses the Claude Agent SDK to answer questi
 
 ```
 packages/
-  db/              # UrlStore abstraction + PostgresUrlStore (Drizzle ORM)
+  db/              # UrlStore abstraction + PostgresUrlStore (Prisma ORM)
   lambda/          # Slack webhook receiver (AWS Lambda + API Gateway)
   agent/           # AI research agent (ECS Fargate, long-running)
   mcp-url-fetcher/ # Custom MCP server for allowlisted URL fetching

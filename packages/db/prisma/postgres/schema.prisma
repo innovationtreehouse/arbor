@@ -1,0 +1,43 @@
+// Postgres schema — production database.
+// Generates a dedicated client into src/generated/postgres so it can coexist
+// with the SQLite client (see ../sqlite/schema.prisma). createStores() picks
+// the client at runtime based on the connection string.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../generated/postgres"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model UrlConfig {
+  url         String   @id
+  description String
+  enabled     Boolean  @default(true)
+  addedBy     String   @map("added_by")
+  addedAt     DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+
+  @@map("url_config")
+}
+
+model AgentConfig {
+  key   String @id
+  value String
+
+  @@map("agent_config")
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  channel    String
+  threadTs   String   @map("thread_ts")
+  userId     String   @map("user_id")
+  prompt     String
+  response   String
+  model      String?
+  durationMs Int      @map("duration_ms")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("audit_log")
+}

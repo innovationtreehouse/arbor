@@ -1,0 +1,43 @@
+// SQLite schema — local development and tests.
+// Mirrors ../postgres/schema.prisma but targets the sqlite provider and
+// generates a separate client into generated/sqlite. createStores() selects
+// this client for file:/:memory: connection strings.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../generated/sqlite"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model UrlConfig {
+  url         String   @id
+  description String
+  enabled     Boolean  @default(true)
+  addedBy     String   @map("added_by")
+  addedAt     DateTime @default(now()) @map("added_at")
+
+  @@map("url_config")
+}
+
+model AgentConfig {
+  key   String @id
+  value String
+
+  @@map("agent_config")
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  channel    String
+  threadTs   String   @map("thread_ts")
+  userId     String   @map("user_id")
+  prompt     String
+  response   String
+  model      String?
+  durationMs Int      @map("duration_ms")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("audit_log")
+}
