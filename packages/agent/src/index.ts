@@ -3,7 +3,7 @@ import {
   ReceiveMessageCommand,
   DeleteMessageCommand,
 } from "@aws-sdk/client-sqs";
-import { PostgresConfigStore, PostgresAuditStore, PostgresUrlStore } from "@arbor/db";
+import { PostgresConfigStore, PostgresAuditStore, PostgresUrlStore, createPostgresClient } from "@arbor/db";
 import { createAuditLogger } from "@arbor/logger";
 import { fetchChannelHistory, fetchThreadHistory, fetchSlackImages, postMessage, postEphemeral } from "./slack.js";
 import type { SlackFile } from "./slack.js";
@@ -27,9 +27,11 @@ const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) throw new Error("DATABASE_URL is required");
 
 const sqsClient = new SQSClient({ region: process.env.AWS_REGION });
-const configStore = new PostgresConfigStore(DATABASE_URL);
-const urlStore = new PostgresUrlStore(DATABASE_URL);
-const auditStore = new PostgresAuditStore(DATABASE_URL);
+// One Prisma client (= one pg pool) shared by all stores in this process.
+const db = createPostgresClient(DATABASE_URL);
+const configStore = new PostgresConfigStore(db);
+const urlStore = new PostgresUrlStore(db);
+const auditStore = new PostgresAuditStore(db);
 const auditLogger = createAuditLogger(auditStore);
 const IDLE_TIMEOUT_MS =
   parseInt(process.env.IDLE_TIMEOUT ?? "15", 10) * 60 * 1000;

@@ -149,15 +149,7 @@ Migrations run via `prisma migrate deploy` against the target environment's `DAT
 - **Prod runs on promotion.** Migrations run against prod before the Lambda zip is deployed. If the migration fails, the old Lambda and task definition remain active.
 - **Migrations must be backwards-compatible.** Because the ECS Fargate task is long-running, there will be a brief window where the new Lambda code is deployed but the existing ECS task is still running the old agent code against the new schema. Avoid breaking schema changes (column renames, drops) without a multi-step migration strategy.
 - **Migration files are version-controlled.** The `packages/db/prisma/postgres/migrations/` directory is committed to the repository. `prisma migrate deploy` applies only the unapplied migrations, making it safe to run repeatedly.
-- **Existing databases must be baselined once.** The `20260608000000_init` migration describes the current schema. A database that already has these tables (created before the move to Prisma) must have this migration marked as applied so `migrate deploy` does not try to recreate the tables:
-
-  ```bash
-  cd packages/db
-  DATABASE_URL="postgres://..." npx prisma migrate resolve \
-    --applied 20260608000000_init --config prisma.config.postgres.ts
-  ```
-
-  Fresh databases need no baselining — `migrate deploy` creates the schema from the migration.
+- **Existing databases self-baseline.** The `20260608000000_init` migration describes the current schema and uses `CREATE TABLE IF NOT EXISTS` (same as the drizzle migration it replaces), so on a database that already has these tables it applies as a no-op and gets recorded in `_prisma_migrations` — no manual `migrate resolve` step, which matters because the databases are only reachable from inside the VPC. Fresh databases get the schema created normally.
 
 ---
 

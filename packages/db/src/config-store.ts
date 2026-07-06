@@ -4,8 +4,10 @@ import type { ConfigStore } from "./store.js";
 export class PostgresConfigStore implements ConfigStore {
   private db: PostgresClient;
 
-  constructor(connectionString: string) {
-    this.db = createPostgresClient(connectionString);
+  // Pass a shared PostgresClient when constructing several stores in one
+  // process — each client owns its own pg connection pool.
+  constructor(db: string | PostgresClient) {
+    this.db = typeof db === "string" ? createPostgresClient(db) : db;
   }
 
   async get(key: string): Promise<string | undefined> {

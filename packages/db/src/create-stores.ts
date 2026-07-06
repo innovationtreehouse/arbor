@@ -1,6 +1,7 @@
 import { PostgresUrlStore } from "./postgres-store.js";
 import { PostgresConfigStore } from "./config-store.js";
 import { PostgresAuditStore } from "./audit-store.js";
+import { createPostgresClient } from "./prisma-postgres.js";
 import { createSqliteStores } from "./sqlite-stores.js";
 import type { UrlStore, ConfigStore, AuditStore } from "./store.js";
 
@@ -15,10 +16,13 @@ export function createStores(connectionString: string): StoreSet {
     connectionString.startsWith("postgres://") ||
     connectionString.startsWith("postgresql://")
   ) {
+    // One client (= one pg pool) shared across the stores, mirroring the
+    // sqlite path's single shared handle.
+    const client = createPostgresClient(connectionString);
     return {
-      urlStore: new PostgresUrlStore(connectionString),
-      configStore: new PostgresConfigStore(connectionString),
-      auditStore: new PostgresAuditStore(connectionString),
+      urlStore: new PostgresUrlStore(client),
+      configStore: new PostgresConfigStore(client),
+      auditStore: new PostgresAuditStore(client),
     };
   }
   const filePath = connectionString.replace(/^file:/, "");

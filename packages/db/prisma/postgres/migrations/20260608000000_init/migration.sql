@@ -1,8 +1,11 @@
+-- IF NOT EXISTS: dev/prod already have these tables from the drizzle era with no
+-- _prisma_migrations baseline; this lets the first `migrate deploy` self-baseline
+-- (no-op apply + record) instead of failing P3018 and bricking the pipeline.
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
 -- CreateTable
-CREATE TABLE "url_config" (
+CREATE TABLE IF NOT EXISTS "url_config" (
     "url" TEXT NOT NULL,
     "description" TEXT NOT NULL,
     "enabled" BOOLEAN NOT NULL DEFAULT true,
@@ -13,7 +16,7 @@ CREATE TABLE "url_config" (
 );
 
 -- CreateTable
-CREATE TABLE "agent_config" (
+CREATE TABLE IF NOT EXISTS "agent_config" (
     "key" TEXT NOT NULL,
     "value" TEXT NOT NULL,
 
@@ -21,7 +24,7 @@ CREATE TABLE "agent_config" (
 );
 
 -- CreateTable
-CREATE TABLE "audit_log" (
+CREATE TABLE IF NOT EXISTS "audit_log" (
     "id" SERIAL NOT NULL,
     "channel" TEXT NOT NULL,
     "thread_ts" TEXT NOT NULL,

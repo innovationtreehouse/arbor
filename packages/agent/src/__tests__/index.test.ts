@@ -17,6 +17,7 @@ const mockConfigStore: ConfigStore = {
 };
 
 vi.mock("@arbor/db", () => ({
+  createPostgresClient: vi.fn().mockReturnValue({}),
   PostgresConfigStore: vi.fn().mockImplementation(function () {
     return mockConfigStore;
   }),
