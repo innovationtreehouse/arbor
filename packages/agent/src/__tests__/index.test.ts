@@ -26,6 +26,9 @@ vi.mock("@arbor/db", () => ({
   PostgresUrlStore: vi.fn().mockImplementation(function () {
     return {};
   }),
+  PostgresUserStore: vi.fn().mockImplementation(function () {
+    return { upsert: vi.fn().mockResolvedValue(undefined), get: vi.fn().mockResolvedValue(undefined) };
+  }),
 }));
 
 vi.mock("../admin.js", () => ({
@@ -41,6 +44,7 @@ vi.mock("../slack.js", () => ({
   fetchThreadHistory: vi.fn().mockResolvedValue([]),
   fetchChannelHistory: vi.fn().mockResolvedValue([]),
   fetchSlackImages: vi.fn().mockResolvedValue([]),
+  lookupSlackUser: vi.fn().mockResolvedValue(undefined),
   postMessage: vi.fn().mockResolvedValue(undefined),
   postEphemeral: vi.fn().mockResolvedValue(undefined),
 }));

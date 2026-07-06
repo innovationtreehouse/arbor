@@ -3,9 +3,9 @@ import {
   ReceiveMessageCommand,
   DeleteMessageCommand,
 } from "@aws-sdk/client-sqs";
-import { PostgresConfigStore, PostgresAuditStore, PostgresUrlStore } from "@arbor/db";
+import { PostgresConfigStore, PostgresAuditStore, PostgresUrlStore, PostgresUserStore } from "@arbor/db";
 import { createAuditLogger } from "@arbor/logger";
-import { fetchChannelHistory, fetchThreadHistory, fetchSlackImages, postMessage, postEphemeral } from "./slack.js";
+import { fetchChannelHistory, fetchThreadHistory, fetchSlackImages, lookupSlackUser, postMessage, postEphemeral } from "./slack.js";
 import type { SlackFile } from "./slack.js";
 import { runAgent } from "./agent.js";
 import { buildPrompt, buildSystemPrompt } from "./prompt.js";
@@ -30,6 +30,7 @@ const sqsClient = new SQSClient({ region: process.env.AWS_REGION });
 const configStore = new PostgresConfigStore(DATABASE_URL);
 const urlStore = new PostgresUrlStore(DATABASE_URL);
 const auditStore = new PostgresAuditStore(DATABASE_URL);
+const userStore = new PostgresUserStore(DATABASE_URL);
 const auditLogger = createAuditLogger(auditStore);
 const IDLE_TIMEOUT_MS =
   parseInt(process.env.IDLE_TIMEOUT ?? "15", 10) * 60 * 1000;
@@ -37,6 +38,17 @@ const SQS_WAIT_SECONDS = 20;
 
 // Number of channel messages to include as compacted context in thread replies
 const THREAD_CHANNEL_CONTEXT = 4;
+
+// Throttle the per-message users.info lookup + upsert: once per user per day is
+// plenty for a display-name cache. Returns true (and marks) if refreshed recently.
+const USER_REFRESH_TTL_MS = 24 * 60 * 60 * 1000;
+const userRefreshedAt = new Map<string, number>();
+function recentlyRefreshedUsers(userId: string): boolean {
+  const last = userRefreshedAt.get(userId);
+  if (last !== undefined && Date.now() - last < USER_REFRESH_TTL_MS) return true;
+  userRefreshedAt.set(userId, Date.now());
+  return false;
+}
 
 export async function processEvent(event: SlackEvent): Promise<void> {
   // Only show the ephemeral "Searching…" when we know we'll always reply.
@@ -74,6 +86,20 @@ export async function processEvent(event: SlackEvent): Promise<void> {
   const images = event.files?.length
     ? await fetchSlackImages(event.files).catch(() => [])
     : [];
+
+  // Cache the user's real name in the background — don't block the response.
+  // Names rarely change: skip the Slack lookup + DB write if refreshed recently.
+  if (event.user && !recentlyRefreshedUsers(event.user)) {
+    lookupSlackUser(event.user)
+      .then((info) => {
+        if (info) {
+          return userStore.upsert({ user_id: event.user, ...info }).catch((err) =>
+            console.warn("[users] Failed to upsert user:", err)
+          );
+        }
+      })
+      .catch(() => { /* non-critical */ });
+  }
 
   const start = Date.now();
   const response = await runAgent(prompt, systemPrompt, model, maxTokens, images);

@@ -1,5 +1,12 @@
 import { pgTable, text, boolean, timestamp, serial, integer } from "drizzle-orm/pg-core";
 
+export const slackUsers = pgTable("slack_users", {
+  user_id: text("user_id").primaryKey(),
+  real_name: text("real_name").notNull(),
+  display_name: text("display_name").notNull(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const urlConfig = pgTable("url_config", {
   url: text("url").primaryKey(),
   description: text("description").notNull(),

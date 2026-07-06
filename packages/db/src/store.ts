@@ -43,6 +43,20 @@ export interface AuditRecord {
 
 export type NewAuditRecord = Omit<AuditRecord, "id" | "created_at">;
 
+export interface SlackUser {
+  user_id: string;
+  real_name: string;
+  display_name: string;
+  updated_at: string; // ISO 8601
+}
+
+export interface UserStore {
+  /** Inserts or updates a Slack user record. */
+  upsert(user: Omit<SlackUser, "updated_at">): Promise<void>;
+  /** Returns a user by ID, or undefined if not cached. */
+  get(user_id: string): Promise<SlackUser | undefined>;
+}
+
 export interface AuditStore {
   write(record: NewAuditRecord): Promise<void>;
   listRecent(limit: number): Promise<AuditRecord[]>;

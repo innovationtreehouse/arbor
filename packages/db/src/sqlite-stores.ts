@@ -10,6 +10,8 @@ import type {
   AuditStore,
   AuditRecord,
   NewAuditRecord,
+  UserStore,
+  SlackUser,
 } from "./store.js";
 
 type SqliteDb = ReturnType<typeof drizzle<typeof schema>>;
@@ -17,6 +19,12 @@ type SqliteDb = ReturnType<typeof drizzle<typeof schema>>;
 function openDb(filePath: string): SqliteDb {
   const sqlite = new Database(filePath);
   sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS "slack_users" (
+      "user_id" text PRIMARY KEY NOT NULL,
+      "real_name" text NOT NULL,
+      "display_name" text NOT NULL,
+      "updated_at" text NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
     CREATE TABLE IF NOT EXISTS "url_config" (
       "url" text PRIMARY KEY NOT NULL,
       "description" text NOT NULL,
@@ -41,6 +49,26 @@ function openDb(filePath: string): SqliteDb {
     );
   `);
   return drizzle(sqlite, { schema });
+}
+
+export class SqliteUserStore implements UserStore {
+  constructor(private db: SqliteDb) {}
+
+  async upsert(user: Omit<SlackUser, "updated_at">): Promise<void> {
+    this.db
+      .insert(schema.slackUsers)
+      .values({ user_id: user.user_id, real_name: user.real_name, display_name: user.display_name })
+      .onConflictDoUpdate({
+        target: schema.slackUsers.user_id,
+        set: { real_name: user.real_name, display_name: user.display_name, updated_at: new Date().toISOString() },
+      })
+      .run();
+  }
+
+  async get(user_id: string): Promise<SlackUser | undefined> {
+    const row = this.db.select().from(schema.slackUsers).where(eq(schema.slackUsers.user_id, user_id)).get();
+    return row ? { user_id: row.user_id, real_name: row.real_name, display_name: row.display_name, updated_at: row.updated_at } : undefined;
+  }
 }
 
 export class SqliteUrlStore implements UrlStore {
@@ -161,12 +189,14 @@ export function createSqliteStores(filePath: string): {
   urlStore: SqliteUrlStore;
   configStore: SqliteConfigStore;
   auditStore: SqliteAuditStore;
+  userStore: SqliteUserStore;
 } {
   const db = openDb(filePath);
   return {
     urlStore: new SqliteUrlStore(db),
     configStore: new SqliteConfigStore(db),
     auditStore: new SqliteAuditStore(db),
+    userStore: new SqliteUserStore(db),
   };
 }
 

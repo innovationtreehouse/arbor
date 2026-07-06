@@ -1,8 +1,8 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { eq, count } from "drizzle-orm";
-import { urlConfig } from "./schema.js";
-import type { UrlStore, UrlEntry, NewUrlEntry } from "./store.js";
+import { urlConfig, slackUsers } from "./schema.js";
+import type { UrlStore, UrlEntry, NewUrlEntry, UserStore, SlackUser } from "./store.js";
 
 export class PostgresUrlStore implements UrlStore {
   private db: ReturnType<typeof drizzle>;
@@ -54,6 +54,41 @@ export class PostgresUrlStore implements UrlStore {
       .from(urlConfig);
     return Number(result[0]?.value ?? 0);
   }
+}
+
+/* v8 ignore start */
+export class PostgresUserStore implements UserStore {
+  private db: ReturnType<typeof drizzle>;
+
+  constructor(connectionString: string) {
+    const client = postgres(connectionString);
+    this.db = drizzle(client, { schema: { slackUsers } });
+  }
+
+  async upsert(user: Omit<SlackUser, "updated_at">): Promise<void> {
+    await this.db
+      .insert(slackUsers)
+      .values({ user_id: user.user_id, real_name: user.real_name, display_name: user.display_name })
+      .onConflictDoUpdate({
+        target: slackUsers.user_id,
+        set: { real_name: user.real_name, display_name: user.display_name, updated_at: new Date() },
+      });
+  }
+
+  async get(user_id: string): Promise<SlackUser | undefined> {
+    const row = await this.db.select().from(slackUsers).where(eq(slackUsers.user_id, user_id)).limit(1);
+    return row[0] ? toSlackUser(row[0]) : undefined;
+  }
+}
+/* v8 ignore stop */
+
+function toSlackUser(row: typeof slackUsers.$inferSelect): SlackUser {
+  return {
+    user_id: row.user_id,
+    real_name: row.real_name,
+    display_name: row.display_name,
+    updated_at: row.updated_at.toISOString(),
+  };
 }
 
 function toEntry(row: typeof urlConfig.$inferSelect): UrlEntry {

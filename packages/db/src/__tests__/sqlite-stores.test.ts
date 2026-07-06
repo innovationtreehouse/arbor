@@ -139,6 +139,32 @@ describe("SqliteAuditStore", () => {
 });
 
 // ---------------------------------------------------------------------------
+// SqliteUserStore
+// ---------------------------------------------------------------------------
+
+describe("SqliteUserStore", () => {
+  it("get returns undefined for unknown user", async () => {
+    expect(await stores.userStore.get("U_UNKNOWN")).toBeUndefined();
+  });
+
+  it("upsert inserts and get retrieves a user", async () => {
+    await stores.userStore.upsert({ user_id: "U1", real_name: "Jane Doe", display_name: "jane" });
+    const user = await stores.userStore.get("U1");
+    expect(user?.real_name).toBe("Jane Doe");
+    expect(user?.display_name).toBe("jane");
+    expect(user?.updated_at).toBeTypeOf("string");
+  });
+
+  it("upsert updates an existing user", async () => {
+    await stores.userStore.upsert({ user_id: "U1", real_name: "Jane Doe", display_name: "jane" });
+    await stores.userStore.upsert({ user_id: "U1", real_name: "Jane Smith", display_name: "janes" });
+    const user = await stores.userStore.get("U1");
+    expect(user?.real_name).toBe("Jane Smith");
+    expect(user?.display_name).toBe("janes");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // createStores factory
 // ---------------------------------------------------------------------------
 
@@ -148,6 +174,7 @@ describe("createStores", () => {
     expect(s.urlStore).toBeDefined();
     expect(s.configStore).toBeDefined();
     expect(s.auditStore).toBeDefined();
+    expect(s.userStore).toBeDefined();
   });
 
   it("returns sqlite stores for file: prefix", () => {
