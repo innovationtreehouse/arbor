@@ -39,6 +39,17 @@ const SQS_WAIT_SECONDS = 20;
 // Number of channel messages to include as compacted context in thread replies
 const THREAD_CHANNEL_CONTEXT = 4;
 
+// Throttle the per-message users.info lookup + upsert: once per user per day is
+// plenty for a display-name cache. Returns true (and marks) if refreshed recently.
+const USER_REFRESH_TTL_MS = 24 * 60 * 60 * 1000;
+const userRefreshedAt = new Map<string, number>();
+function recentlyRefreshedUsers(userId: string): boolean {
+  const last = userRefreshedAt.get(userId);
+  if (last !== undefined && Date.now() - last < USER_REFRESH_TTL_MS) return true;
+  userRefreshedAt.set(userId, Date.now());
+  return false;
+}
+
 export async function processEvent(event: SlackEvent): Promise<void> {
   // Only show the ephemeral "Searching…" when we know we'll always reply.
   // For discretion-mode events, skip it — the bot may decide not to reply
@@ -76,8 +87,9 @@ export async function processEvent(event: SlackEvent): Promise<void> {
     ? await fetchSlackImages(event.files).catch(() => [])
     : [];
 
-  // Cache the user's real name in the background — don't block the response
-  if (event.user) {
+  // Cache the user's real name in the background — don't block the response.
+  // Names rarely change: skip the Slack lookup + DB write if refreshed recently.
+  if (event.user && !recentlyRefreshedUsers(event.user)) {
     lookupSlackUser(event.user)
       .then((info) => {
         if (info) {
