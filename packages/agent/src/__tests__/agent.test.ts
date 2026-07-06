@@ -57,11 +57,12 @@ describe("runAgent", () => {
         yield {
           result: "answer",
           total_cost_usd: 0.0042,
+          // real SDKResultMessage.usage uses the API's snake_case keys
           usage: {
-            inputTokens: 800,
-            outputTokens: 300,
-            cacheReadInputTokens: 150,
-            cacheCreationInputTokens: 50,
+            input_tokens: 800,
+            output_tokens: 300,
+            cache_read_input_tokens: 150,
+            cache_creation_input_tokens: 50,
           },
         };
       })()

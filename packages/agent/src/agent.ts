@@ -190,12 +190,13 @@ async function runAgentOnce(
       result = message.result;
       const msg = message as Record<string, unknown>;
       costUsd = typeof msg.total_cost_usd === "number" ? msg.total_cost_usd : 0;
+      // SDKResultMessage.usage is the API Usage shape — snake_case keys
       const usage = msg.usage as Record<string, number> | undefined;
       if (usage) {
-        inputTokens = usage.inputTokens ?? 0;
-        outputTokens = usage.outputTokens ?? 0;
-        cacheReadTokens = usage.cacheReadInputTokens ?? 0;
-        cacheCreationTokens = usage.cacheCreationInputTokens ?? 0;
+        inputTokens = usage.input_tokens ?? 0;
+        outputTokens = usage.output_tokens ?? 0;
+        cacheReadTokens = usage.cache_read_input_tokens ?? 0;
+        cacheCreationTokens = usage.cache_creation_input_tokens ?? 0;
       }
     }
   }
