@@ -41,7 +41,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -101,7 +101,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -190,7 +190,7 @@ jobs:
             --jq '[.labels[].name] | contains(["reviewed"]) | if . then "true" else "false" end')
           echo "skip=$has_reviewed" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: steps.skip-check.outputs.skip != 'true'
         with:
           fetch-depth: 0
@@ -298,7 +298,7 @@ jobs:
             -f description="Re-checking after new commits" \
             --silent
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -364,7 +364,7 @@ jobs:
         run: |
           echo "::warning::BOT_ACTOR repository variable is not set. The bot comment loop guard is inactive — the agent may respond to its own comments. Configure BOT_ACTOR in Settings → Variables."
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 

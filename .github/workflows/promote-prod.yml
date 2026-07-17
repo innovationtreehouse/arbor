@@ -52,7 +52,7 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Release tag: $TAG"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.sha }}
           fetch-depth: 0
@@ -68,7 +68,7 @@ jobs:
           fi
           echo "SHA $SHA_INPUT confirmed on main."
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -77,13 +77,13 @@ jobs:
         run: npm ci
 
       - name: Configure AWS credentials (prod)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_PROD }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Log in to ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
