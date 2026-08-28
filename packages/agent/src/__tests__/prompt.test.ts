@@ -4,11 +4,25 @@ import { getUserDocs } from "../user-docs.js";
 import type { SlackMessage } from "../prompt.js";
 
 describe("buildSystemPrompt", () => {
-  it("mentions key data sources", () => {
+  it("mentions GitHub and URL Fetcher regardless of gdrive config", () => {
+    delete process.env.GDRIVE_MCP_PROXY_URL;
     const prompt = buildSystemPrompt();
-    expect(prompt).toContain("Google Drive");
     expect(prompt).toContain("GitHub");
     expect(prompt).toContain("URL Fetcher");
+  });
+
+  it("mentions Google Drive when GDRIVE_MCP_PROXY_URL is set", () => {
+    process.env.GDRIVE_MCP_PROXY_URL = "http://127.0.0.1:8123/mcp";
+    try {
+      expect(buildSystemPrompt()).toContain("Google Drive");
+    } finally {
+      delete process.env.GDRIVE_MCP_PROXY_URL;
+    }
+  });
+
+  it("omits Google Drive when GDRIVE_MCP_PROXY_URL is not set", () => {
+    delete process.env.GDRIVE_MCP_PROXY_URL;
+    expect(buildSystemPrompt()).not.toContain("Google Drive");
   });
 
   it("includes character limit guidance", () => {

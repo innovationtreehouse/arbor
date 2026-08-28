@@ -22,7 +22,9 @@ Reply in any existing thread. ${AGENT_NAME} reads the full thread context plus r
 
 - **Find documents** — search Google Drive for policies, specs, reports, and other files
 - **Read documents** — open and summarize any Drive file it can find
+- **Create and write documents** — create new Google Docs and append or insert text into existing ones
 - **Search GitHub** — look up issues, pull requests, code, and commit history
+- **Create GitHub issues and comments** — open new issues and comment on existing issues or PRs
 - **Fetch web pages** — retrieve content from an approved list of URLs (ask an admin to add URLs)
 
 ### Tips
@@ -34,7 +36,6 @@ Reply in any existing thread. ${AGENT_NAME} reads the full thread context plus r
 
 ### What ${AGENT_NAME} cannot do
 
-- Write to Google Drive or GitHub
 - Access channels or DMs it has not been added to
 - Browse arbitrary websites (only pre-approved URLs)
 - Remember information between separate conversations (each thread is independent)
